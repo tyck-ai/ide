@@ -1,0 +1,62 @@
+import { writable, derived } from 'svelte/store';
+
+export interface OpenFile {
+	path: string;
+	name: string;
+	content: string;
+	modified: boolean;
+}
+
+export const openFiles = writable<OpenFile[]>([]);
+export const activeFilePath = writable<string | null>(null);
+export const projectRoot = writable<string | null>(null);
+export const selection = writable<string>('');
+export const cursorLine = writable<number>(1);
+
+export const activeFile = derived(
+	[openFiles, activeFilePath],
+	([$openFiles, $activeFilePath]) => {
+		return $openFiles.find(f => f.path === $activeFilePath) ?? null;
+	}
+);
+
+export function openFileInEditor(path: string, name: string, content: string) {
+	openFiles.update(files => {
+		const existing = files.find(f => f.path === path);
+		if (!existing) {
+			files.push({ path, name, content, modified: false });
+		}
+		return files;
+	});
+	activeFilePath.set(path);
+}
+
+export function updateFileContent(path: string, content: string) {
+	openFiles.update(files =>
+		files.map(f => f.path === path ? { ...f, content, modified: true } : f)
+	);
+}
+
+export function markFileSaved(path: string) {
+	openFiles.update(files =>
+		files.map(f => f.path === path ? { ...f, modified: false } : f)
+	);
+}
+
+export function closeFile(path: string) {
+	openFiles.update(files => files.filter(f => f.path !== path));
+	activeFilePath.update(current => {
+		if (current === path) {
+			let remaining: OpenFile[] = [];
+			openFiles.subscribe(f => remaining = f)();
+			return remaining.length > 0 ? remaining[remaining.length - 1].path : null;
+		}
+		return current;
+	});
+}
+
+/** Close all files and reset workspace state. */
+export function resetWorkspace() {
+	openFiles.set([]);
+	activeFilePath.set(null);
+}
