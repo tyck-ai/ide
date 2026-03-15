@@ -8,6 +8,7 @@
 	let creating = $state(false);
 	let switching = $state(false);
 	let stashFirst = $state(false);
+	let branchError = $state<string | null>(null);
 	let inputEl: HTMLInputElement;
 
 	onMount(() => {
@@ -39,9 +40,12 @@
 
 	async function switchToBranch(branchName: string) {
 		if (switching) return;
-		
+
 		if ($hasChanges && !stashFirst) {
-			// Could show a warning here
+			const proceed = window.confirm(
+				'You have uncommitted changes. Switch anyway?\n\nTip: Check "Stash changes first" to save them before switching.'
+			);
+			if (!proceed) return;
 		}
 
 		switching = true;
@@ -61,13 +65,27 @@
 		}
 	}
 
+	function isValidBranchName(name: string): boolean {
+		// Git branch name rules: no spaces, no .., no ~^:?\[, no trailing ., no leading -
+		return /^[a-zA-Z0-9][a-zA-Z0-9._\/-]*[a-zA-Z0-9]$/.test(name)
+			&& !name.includes('..')
+			&& !name.includes('//')
+			&& name.length >= 1
+			&& name.length <= 100;
+	}
+
 	async function createBranch() {
-		if (!newBranchName.trim() || creating) return;
-		
+		const name = newBranchName.trim();
+		if (!name || creating) return;
+		if (!isValidBranchName(name)) {
+			branchError = 'Invalid branch name. Use letters, numbers, hyphens, dots, or slashes.';
+			return;
+		}
+		branchError = null;
 		creating = true;
-		const success = await git.createBranch(newBranchName.trim());
+		const success = await git.createBranch(name);
 		creating = false;
-		
+
 		if (success) {
 			newBranchName = '';
 			close();
@@ -163,16 +181,20 @@
 					type="text"
 					placeholder="new-branch-name"
 					class="create-input"
+					oninput={() => branchError = null}
 					onkeydown={(e) => e.key === 'Enter' && createBranch()}
 				/>
-				<button 
-					class="create-btn" 
+				<button
+					class="create-btn"
 					onclick={createBranch}
 					disabled={!newBranchName.trim() || creating}
 				>
 					{creating ? '...' : 'Create'}
 				</button>
 			</div>
+			{#if branchError}
+				<div class="branch-error">{branchError}</div>
+			{/if}
 		</div>
 	</div>
 </div>
@@ -387,6 +409,12 @@
 
 	.create-input::placeholder {
 		color: var(--color-text-subtle);
+	}
+
+	.branch-error {
+		padding: 4px 12px 8px;
+		font-size: 11px;
+		color: var(--color-error, #f87171);
 	}
 
 	.create-btn {

@@ -44,11 +44,13 @@ export function markFileSaved(path: string) {
 }
 
 export function closeFile(path: string) {
-	openFiles.update(files => files.filter(f => f.path !== path));
+	// Read current files, compute next active, then update both atomically
+	let files: OpenFile[] = [];
+	openFiles.subscribe(f => files = f)();
+	const remaining = files.filter(f => f.path !== path);
+	openFiles.set(remaining);
 	activeFilePath.update(current => {
 		if (current === path) {
-			let remaining: OpenFile[] = [];
-			openFiles.subscribe(f => remaining = f)();
 			return remaining.length > 0 ? remaining[remaining.length - 1].path : null;
 		}
 		return current;

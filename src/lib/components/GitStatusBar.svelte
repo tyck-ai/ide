@@ -43,7 +43,11 @@
 	<div class="left-section">
 		<button class="branch-btn" onclick={openBranchSwitcher} title="Switch branch">
 			<span class="branch-icon">⎇</span>
-			<span class="branch-name">{$git.branch || 'No branch'}</span>
+			<span class="branch-name">{
+				!$git.branch ? 'No branch' :
+				$git.branch.startsWith('(HEAD detached') ? 'Detached HEAD' :
+				$git.branch
+			}</span>
 			<span class="dropdown-arrow">▾</span>
 		</button>
 

@@ -202,12 +202,19 @@ function createSessionReviewStore() {
 		}
 	}
 
+	const acceptInFlight = new Set<string>();
+
 	async function acceptFile(sessionId: string, path: string) {
+		// Prevent concurrent accept calls for the same file
+		const key = `${sessionId}:${path}`;
+		if (acceptInFlight.has(key)) return;
+		acceptInFlight.add(key);
+
 		const session = getSession(sessionId);
-		if (!session) return;
+		if (!session) { acceptInFlight.delete(key); return; }
 
 		const diff = session.diffs.find(d => d.path === path);
-		if (!diff) return;
+		if (!diff) { acceptInFlight.delete(key); return; }
 
 		try {
 			const result = await invoke<AcceptResult>('accept_worktree_file', {
@@ -254,6 +261,8 @@ function createSessionReviewStore() {
 				next.set(sessionId, { ...s, fileDecisions: d, conflicts: c });
 				return next;
 			});
+		} finally {
+			acceptInFlight.delete(key);
 		}
 	}
 

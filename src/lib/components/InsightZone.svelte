@@ -32,7 +32,11 @@
 	async function newSessionWith(providerId: string) {
 		showNewMenu = false;
 		activeProviderId.set(providerId);
-		await spawnAgentSession(undefined, providerId);
+		try {
+			await spawnAgentSession(undefined, providerId);
+		} catch (e) {
+			console.error('Failed to spawn session:', e);
+		}
 	}
 
 	async function toggleSessionList() {
@@ -96,7 +100,7 @@
 	// Spawn the first session when projectRoot is ready and no sessions exist
 	$effect(() => {
 		if ($agentSessions.length === 0 && $projectRoot) {
-			spawnAgentSession();
+			spawnAgentSession().catch(() => { /* no provider installed */ });
 		}
 	});
 </script>

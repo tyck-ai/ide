@@ -25,7 +25,7 @@
 				id: sessionId,
 				cols: terminal.cols,
 				rows: terminal.rows,
-			});
+			}).catch(() => { /* PTY closed */ });
 		} catch { /* ignore */ }
 	}
 
@@ -82,7 +82,7 @@
 
 		// Write terminal input to PTY
 		terminal.onData((data: string) => {
-			invoke('write_terminal', { id: sessionId, data });
+			invoke('write_terminal', { id: sessionId, data }).catch(() => { /* PTY closed */ });
 		});
 
 		// Handle resize with debounce
@@ -96,7 +96,7 @@
 		unlistenExit?.();
 		resizeObserver?.disconnect();
 		terminal?.dispose();
-		invoke('kill_terminal', { id: sessionId });
+		invoke('kill_terminal', { id: sessionId }).catch(() => { /* already dead */ });
 	});
 </script>
 

@@ -9,6 +9,7 @@
 	let modifiedContent = $state('');
 	let commitMessage = $state('');
 	let committing = $state(false);
+	let discardConfirmPath = $state<string | null>(null);
 	let diffEditor: any = null;
 	let editorContainer: HTMLDivElement;
 
@@ -73,13 +74,18 @@
 		await git.stage([path]);
 	}
 
-	async function discardFile(file: FileStatus | string) {
+	function discardFile(file: FileStatus | string) {
 		const path = typeof file === 'string' ? file : file.path;
-		if (confirm(`Discard changes to ${path}?`)) {
-			await git.discardFile(path);
-			if (selectedFile?.path === path) {
-				selectedFile = null;
-			}
+		discardConfirmPath = path;
+	}
+
+	async function confirmDiscard() {
+		if (!discardConfirmPath) return;
+		const path = discardConfirmPath;
+		discardConfirmPath = null;
+		await git.discardFile(path);
+		if (selectedFile?.path === path) {
+			selectedFile = null;
 		}
 	}
 
@@ -206,12 +212,18 @@
 				<div class="section-header">
 					<span>Conflicts ({$git.conflicts.length})</span>
 				</div>
+				<div class="conflict-help">
+					Resolve conflicts in each file, then stage to mark resolved.
+				</div>
 				{#each $git.conflicts as path (path)}
 					<div class="file-item conflict">
 						<button class="file-btn" onclick={() => selectFile(path, false)}>
 							<span class="status-icon" style="color: var(--color-error)">!</span>
 							<span class="file-path">{path}</span>
 						</button>
+						<div class="file-actions">
+							<button class="action-btn" title="Stage (mark as resolved)" onclick={() => git.stage([path])}>✓</button>
+						</div>
 					</div>
 				{/each}
 			</div>
@@ -265,7 +277,73 @@
 	</div>
 </div>
 
+{#if discardConfirmPath}
+	<!-- svelte-ignore a11y_click_events_have_key_events -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="discard-overlay" onclick={() => discardConfirmPath = null}>
+		<div class="discard-modal" onclick={(e) => e.stopPropagation()}>
+			<div class="discard-modal__title">Discard Changes</div>
+			<div class="discard-modal__text">
+				Discard all changes to <strong>{discardConfirmPath}</strong>? This cannot be undone.
+			</div>
+			<div class="discard-modal__actions">
+				<button class="discard-modal__btn cancel" onclick={() => discardConfirmPath = null}>Cancel</button>
+				<button class="discard-modal__btn danger" onclick={confirmDiscard}>Discard</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
+	.discard-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(0,0,0,0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 300;
+	}
+	.discard-modal {
+		background: var(--color-surface, #1e1e1e);
+		border: 1px solid var(--color-border, #3c3c3c);
+		border-radius: 8px;
+		padding: 20px;
+		max-width: 400px;
+		width: 90%;
+	}
+	.discard-modal__title {
+		font-size: 15px;
+		font-weight: 600;
+		margin-bottom: 12px;
+	}
+	.discard-modal__text {
+		font-size: 13px;
+		color: var(--color-text-secondary, #a0a0a0);
+		line-height: 1.5;
+		margin-bottom: 16px;
+	}
+	.discard-modal__actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+	.discard-modal__btn {
+		padding: 6px 14px;
+		border-radius: 4px;
+		font-size: 13px;
+		cursor: pointer;
+		border: 1px solid var(--color-border, #3c3c3c);
+	}
+	.discard-modal__btn.cancel {
+		background: var(--color-surface, #2d2d2d);
+		color: var(--color-text, #e0e0e0);
+	}
+	.discard-modal__btn.danger {
+		background: var(--color-error, #da3633);
+		color: white;
+		border-color: var(--color-error, #da3633);
+	}
 	.changes-tab {
 		display: flex;
 		height: 100%;
@@ -300,6 +378,14 @@
 		text-transform: uppercase;
 		letter-spacing: 0.5px;
 		background: var(--color-surface);
+	}
+
+	.conflict-help {
+		padding: 6px 16px;
+		font-size: 11px;
+		color: var(--color-warning, #fbbf24);
+		background: rgba(251, 191, 36, 0.08);
+		border-bottom: 1px solid var(--color-border-muted);
 	}
 
 	.stage-all-btn {
