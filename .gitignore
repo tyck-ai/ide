@@ -35,8 +35,11 @@ vite.config.ts.timestamp-*
 *~
 
 # Development tools (local only)
-.claude
-.cursor
+.claude/
+.cursor/
+
+# Documentation (generated/research)
+docs/
 
 # Logs
 *.log
