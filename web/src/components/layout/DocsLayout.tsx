@@ -1,7 +1,7 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Logo } from '../ui';
 
-const navigation = [
+const navigation: { title: string; badge?: string; items: { title: string; href: string }[] }[] = [
   {
     title: 'Getting Started',
     items: [
@@ -22,6 +22,7 @@ const navigation = [
   },
   {
     title: 'Tapp Development',
+    badge: 'WIP',
     items: [
       { title: 'Quick Start', href: '/docs/tapp' },
       { title: 'Development Guide', href: '/docs/tapp/development' },
@@ -57,8 +58,13 @@ export function DocsLayout() {
           <nav className="space-y-6">
             {navigation.map((section) => (
               <div key={section.title}>
-                <h3 className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-3">
+                <h3 className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-3 flex items-center gap-2">
                   {section.title}
+                  {section.badge && (
+                    <span className="px-1.5 py-0.5 rounded bg-[var(--color-yellow)]/20 text-[var(--color-yellow)] text-[10px] font-medium normal-case">
+                      {section.badge}
+                    </span>
+                  )}
                 </h3>
                 <ul className="space-y-1">
                   {section.items.map((item) => (

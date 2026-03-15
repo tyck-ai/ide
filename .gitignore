@@ -1,10 +1,51 @@
+# OS
 .DS_Store
-node_modules
+Thumbs.db
+
+# Dependencies
+node_modules/
+
+# Build outputs
 /build
+/dist
 /.svelte-kit
 /package
+target/
+
+# Tauri
+src-tauri/target/
+
+# WASM build artifacts
+*.wasm
+!packages/examples/**/*.wasm
+
+# Environment
 .env
 .env.*
 !.env.example
+
+# Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Development tools (local only)
+.claude
+.cursor
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Package manager locks (keep package-lock.json for reproducible builds)
+yarn.lock
+pnpm-lock.yaml

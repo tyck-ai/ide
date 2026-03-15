@@ -1,9 +1,13 @@
 [package]
 name = "tyck"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "An agent agnostic editor"
+authors = ["Tyck Contributors"]
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/tyck-dev/tyck"
+keywords = ["editor", "ide", "ai", "tauri", "wasm"]
+categories = ["development-tools", "text-editors"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

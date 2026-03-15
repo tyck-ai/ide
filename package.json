@@ -1,7 +1,7 @@
 {
   "name": "tyck",
   "version": "0.1.0",
-  "description": "",
+  "description": "an agent agnostic code editor",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
