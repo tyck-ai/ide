@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
 	import { activeFilePath, selection, cursorLine } from '$lib/stores/editor';
-	import { activeTerminalId, terminalVisible, addTerminal } from '$lib/stores/terminal';
+	import { activeTerminalId, terminalVisible, addTerminal, toggleTerminal } from '$lib/stores/terminal';
 	import { activeSessionId } from '$lib/stores/agentTerminal';
 
 	let input = $state('');
@@ -78,6 +78,9 @@
 		<button class="focus-btn" onclick={focusAgent} title="Focus agent (Cmd+I)">
 			AI &#8599;
 		</button>
+		<button class="terminal-btn" class:active={$terminalVisible} onclick={toggleTerminal} title="Toggle terminal (Ctrl+`)">
+			&#9002; Terminal
+		</button>
 	</div>
 
 	<div class="input-wrapper">
@@ -132,6 +135,25 @@
 	.focus-btn:hover {
 		background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 		color: var(--color-accent);
+	}
+	.terminal-btn {
+		background: var(--color-base);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 6px;
+		color: var(--color-text-subtle);
+		font-size: 11px;
+		font-weight: 600;
+		padding: 4px 10px;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.terminal-btn:hover {
+		color: var(--color-text);
+		border-color: var(--color-border);
+	}
+	.terminal-btn.active {
+		color: var(--color-success);
+		border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
 	}
 	.input-wrapper {
 		display: flex;

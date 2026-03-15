@@ -228,11 +228,9 @@
 			<div class="zone insight" class:zone-hidden={!$showInsight}>
 				<InsightZone />
 			</div>
-		</div>
 
-		{#if $terminalVisible}
 			<TerminalPanel />
-		{/if}
+		</div>
 
 		<div class="command-row">
 			<CommandRail />
@@ -294,6 +292,7 @@
 		flex: 1;
 		display: grid;
 		overflow: hidden;
+		position: relative;
 	}
 	.command-row {
 		flex-shrink: 0;
