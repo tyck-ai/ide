@@ -21,8 +21,17 @@
 	}
 
 	function closeTerminal(id: string) {
+		const isLast = $terminalSessions.length <= 1;
 		invoke('kill_terminal', { id }).catch(() => { /* already dead */ });
 		removeTerminal(id);
+		// If closing the last tab, hide the panel instead of auto-creating a new one
+		if (isLast) {
+			terminalVisible.set(false);
+		}
+	}
+
+	function hidePanel() {
+		terminalVisible.set(false);
 	}
 
 	function onDragStart(e: MouseEvent) {
@@ -60,8 +69,13 @@
 	});
 </script>
 
-{#if $terminalVisible}
-	<div class="terminal-panel" style="height: {panelHeight}px" class:dragging>
+{#if $terminalSessions.length > 0}
+	<div
+		class="terminal-panel"
+		class:dragging
+		class:collapsed={!$terminalVisible}
+		style="height: {$terminalVisible ? panelHeight : 0}px"
+	>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="drag-handle-h" onmousedown={onDragStart}>
 			<div class="handle-bar"></div>
@@ -87,7 +101,11 @@
 					</div>
 				{/each}
 			</div>
-			<button class="new-btn" onclick={newTerminal}>+</button>
+			<button class="new-btn" onclick={newTerminal} title="New terminal">+</button>
+			<button class="hide-btn" onclick={hidePanel} title="Hide terminal (Ctrl+`)">
+				<span class="hide-label">Hide</span>
+				<span class="hide-shortcut">⌃`</span>
+			</button>
 		</div>
 
 		<div class="terminal-content">
@@ -107,9 +125,19 @@
 		background: var(--color-base);
 		border-top: 1px solid var(--color-border-muted);
 		overflow: hidden;
+		position: absolute;
+		bottom: 0;
+		left: 0;
+		right: 0;
+		z-index: 20;
 	}
 	.terminal-panel.dragging {
 		user-select: none;
+	}
+	.terminal-panel.collapsed {
+		height: 0 !important;
+		overflow: hidden;
+		border-top: none;
 	}
 	.drag-handle-h {
 		height: 4px;
@@ -188,6 +216,27 @@
 	}
 	.new-btn:hover {
 		color: var(--color-text);
+	}
+	.hide-btn {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		background: none;
+		border: 1px solid var(--color-border-muted);
+		border-radius: 4px;
+		color: var(--color-text-subtle);
+		font-size: 11px;
+		cursor: pointer;
+		padding: 3px 10px;
+		margin-left: auto;
+	}
+	.hide-btn:hover {
+		color: var(--color-text);
+		background: var(--color-surface);
+	}
+	.hide-shortcut {
+		opacity: 0.5;
+		font-size: 10px;
 	}
 	.terminal-content {
 		flex: 1;
