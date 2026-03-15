@@ -1,0 +1,12 @@
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/deps/notify-b8ed4997134d20fd.d: /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/lib.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/fsevent.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/null.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/poll.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/config.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/error.rs
+
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/deps/libnotify-b8ed4997134d20fd.rlib: /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/lib.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/fsevent.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/null.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/poll.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/config.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/error.rs
+
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/deps/libnotify-b8ed4997134d20fd.rmeta: /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/lib.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/fsevent.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/null.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/poll.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/config.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/error.rs
+
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/lib.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/fsevent.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/null.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/poll.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/config.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-7.0.0/src/error.rs:

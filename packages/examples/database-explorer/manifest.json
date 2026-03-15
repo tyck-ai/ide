@@ -1,0 +1,16 @@
+{
+  "id": "database-explorer",
+  "name": "Database Explorer",
+  "version": "0.1.0",
+  "description": "Browse, query, and manage databases directly from Tyck IDE",
+  "author": "Tyck Team",
+  "permissions": [
+    "storage:persistent",
+    "agent:tools",
+    "agent:hooks"
+  ],
+  "ui": {
+    "layout": "sidebar",
+    "minWidth": 300
+  }
+}

@@ -28,5 +28,33 @@ once_cell = "1"
 portable-pty = "0.8"
 notify = "7"
 notify-debouncer-mini = "0.5"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+
+# WASM Runtime (Tapp Extension System)
+wasmtime = { version = "29", features = ["component-model"] }
+wasmtime-wasi = "29"
+
+# Storage for apps
+rusqlite = { version = "0.32", features = ["bundled"] }
+dirs = "5"
+
+# Async utilities
+async-trait = "0.1"
+futures = "0.3"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+log = "0.4"
+
+# UUID for app instances
+uuid = { version = "1", features = ["v4"] }
+
+# TLS for HTTPS in app network requests
+native-tls = "0.2"
+
+# Cryptographic hashing for package signing
+sha2 = "0.10"
 

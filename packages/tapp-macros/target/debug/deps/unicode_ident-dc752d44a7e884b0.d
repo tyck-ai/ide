@@ -1,0 +1,6 @@
+/Users/bharat/claude/ide/tyck/packages/tapp-macros/target/debug/deps/unicode_ident-dc752d44a7e884b0.d: /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unicode-ident-1.0.24/src/lib.rs /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unicode-ident-1.0.24/src/tables.rs
+
+/Users/bharat/claude/ide/tyck/packages/tapp-macros/target/debug/deps/libunicode_ident-dc752d44a7e884b0.rmeta: /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unicode-ident-1.0.24/src/lib.rs /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unicode-ident-1.0.24/src/tables.rs
+
+/var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unicode-ident-1.0.24/src/lib.rs:
+/var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unicode-ident-1.0.24/src/tables.rs:

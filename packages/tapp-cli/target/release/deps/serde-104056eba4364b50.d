@@ -1,0 +1,14 @@
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/deps/serde-104056eba4364b50.d: /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/build/serde-3b1538848242a301/out/private.rs
+
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/deps/libserde-104056eba4364b50.rlib: /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/build/serde-3b1538848242a301/out/private.rs
+
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/deps/libserde-104056eba4364b50.rmeta: /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/build/serde-3b1538848242a301/out/private.rs
+
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/build/serde-3b1538848242a301/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/build/serde-3b1538848242a301/out

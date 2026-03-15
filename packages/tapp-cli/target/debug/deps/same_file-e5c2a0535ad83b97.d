@@ -1,0 +1,6 @@
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/debug/deps/same_file-e5c2a0535ad83b97.d: /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/same-file-1.0.6/src/lib.rs /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/same-file-1.0.6/src/unix.rs
+
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/debug/deps/libsame_file-e5c2a0535ad83b97.rmeta: /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/same-file-1.0.6/src/lib.rs /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/same-file-1.0.6/src/unix.rs
+
+/var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/same-file-1.0.6/src/lib.rs:
+/var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/same-file-1.0.6/src/unix.rs:

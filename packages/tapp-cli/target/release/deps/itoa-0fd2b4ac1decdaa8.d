@@ -1,0 +1,8 @@
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/deps/itoa-0fd2b4ac1decdaa8.d: /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.17/src/lib.rs /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.17/src/u128_ext.rs
+
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/deps/libitoa-0fd2b4ac1decdaa8.rlib: /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.17/src/lib.rs /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.17/src/u128_ext.rs
+
+/Users/bharat/claude/ide/tyck/packages/tapp-cli/target/release/deps/libitoa-0fd2b4ac1decdaa8.rmeta: /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.17/src/lib.rs /var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.17/src/u128_ext.rs
+
+/var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.17/src/lib.rs:
+/var/folders/gf/z2ct4nws3q92hdmvj0m571ch0000gn/T/cursor-sandbox-cache/80c8e40b51e93709a394e43b89f6f6fd/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.17/src/u128_ext.rs:

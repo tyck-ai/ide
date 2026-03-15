@@ -1,14 +1,38 @@
 mod commands;
+mod wasm;
+mod apps;
 
 use commands::{agent, checkpoint, fs, git, settings, terminal, tyck, worktree};
+use apps::commands as tapp_commands;
+use apps::manager::create_shared_manager;
+use apps::store::AppStore;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    let app_manager = rt.block_on(async {
+        create_shared_manager().await.expect("Failed to create app manager")
+    });
+
+    let app_store = rt.block_on(async {
+        let cache_path = dirs::cache_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("tyck")
+            .join("store");
+        Arc::new(RwLock::new(
+            AppStore::new(cache_path).expect("Failed to create app store")
+        ))
+    });
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(app_manager)
+        .manage(app_store)
         .setup(|app| {
             let open_folder_item = MenuItemBuilder::new("Open Folder...")
                 .accelerator("CmdOrCtrl+O")
@@ -148,6 +172,27 @@ pub fn run() {
             worktree::resolve_conflict,
             worktree::cleanup_stale_worktrees,
             worktree::check_git_version,
+            // Tapp extension system commands
+            tapp_commands::tapp_list_apps,
+            tapp_commands::tapp_install_app,
+            tapp_commands::tapp_uninstall_app,
+            tapp_commands::tapp_start_app,
+            tapp_commands::tapp_stop_app,
+            tapp_commands::tapp_enable_app,
+            tapp_commands::tapp_disable_app,
+            tapp_commands::tapp_get_tool_definitions,
+            tapp_commands::tapp_execute_tool,
+            tapp_commands::tapp_dispatch_hook,
+            tapp_commands::tapp_hot_reload,
+            tapp_commands::tapp_enable_watch,
+            tapp_commands::tapp_disable_watch,
+            tapp_commands::tapp_store_search,
+            tapp_commands::tapp_store_get_listing,
+            tapp_commands::tapp_store_refresh,
+            tapp_commands::tapp_store_check_updates,
+            tapp_commands::tapp_store_download,
+            tapp_commands::tapp_get_ui,
+            tapp_commands::tapp_dispatch_action,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

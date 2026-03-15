@@ -1,0 +1,37 @@
+package tapp:runtime@0.1.0;
+
+interface app {
+    /// Initialize the app, returns error message or empty string on success
+    init: func() -> result<_, string>;
+    
+    /// Render the UI tree as JSON
+    render: func() -> result<string, string>;
+    
+    /// Handle an action (JSON in, JSON out)
+    handle: func(action: string) -> result<string, string>;
+    
+    /// Shutdown the app
+    shutdown: func() -> result<_, string>;
+}
+
+interface tools {
+    /// List available tool definitions as JSON
+    list-tools: func() -> result<string, string>;
+    
+    /// Call a tool by name with JSON args, returns JSON result
+    call-tool: func(name: string, args: string) -> result<string, string>;
+}
+
+interface hooks {
+    /// List registered hooks as JSON
+    list-hooks: func() -> result<string, string>;
+    
+    /// Invoke a hook with JSON data, returns JSON result
+    invoke-hook: func(hook-type: string, data: string) -> result<string, string>;
+}
+
+world tapp-app {
+    export app;
+    export tools;
+    export hooks;
+}

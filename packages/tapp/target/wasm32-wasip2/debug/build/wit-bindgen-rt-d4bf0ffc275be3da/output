@@ -1,0 +1,2 @@
+cargo:rustc-link-lib=wit_bindgen_cabi_realloc0_36_0
+cargo:rustc-link-search=native=/Users/bharat/claude/ide/tyck/packages/tapp/target/wasm32-wasip2/debug/build/wit-bindgen-rt-d4bf0ffc275be3da/out

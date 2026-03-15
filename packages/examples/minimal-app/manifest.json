@@ -1,0 +1,8 @@
+{
+  "id": "minimal-app",
+  "name": "Minimal App",
+  "version": "0.1.0",
+  "description": "A minimal test app",
+  "author": "Test",
+  "permissions": []
+}

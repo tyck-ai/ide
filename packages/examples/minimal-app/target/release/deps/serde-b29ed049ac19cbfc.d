@@ -1,0 +1,14 @@
+/Users/bharat/claude/ide/tyck/packages/examples/minimal-app/target/release/deps/serde-b29ed049ac19cbfc.d: /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/bharat/claude/ide/tyck/packages/examples/minimal-app/target/release/build/serde-2c32af8cdf82d39f/out/private.rs
+
+/Users/bharat/claude/ide/tyck/packages/examples/minimal-app/target/release/deps/libserde-b29ed049ac19cbfc.rlib: /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/bharat/claude/ide/tyck/packages/examples/minimal-app/target/release/build/serde-2c32af8cdf82d39f/out/private.rs
+
+/Users/bharat/claude/ide/tyck/packages/examples/minimal-app/target/release/deps/libserde-b29ed049ac19cbfc.rmeta: /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /Users/bharat/claude/ide/tyck/packages/examples/minimal-app/target/release/build/serde-2c32af8cdf82d39f/out/private.rs
+
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/Users/bharat/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/Users/bharat/claude/ide/tyck/packages/examples/minimal-app/target/release/build/serde-2c32af8cdf82d39f/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/bharat/claude/ide/tyck/packages/examples/minimal-app/target/release/build/serde-2c32af8cdf82d39f/out

@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import type { AppListing } from './tapp';
 
 // Simple panel visibility — no fake "modes" until they have real functionality
 export const showContext = writable(true);
@@ -12,3 +13,13 @@ export const gitViewTab = writable<'changes' | 'history' | 'branches' | 'stashes
 // Modals
 export const showBranchSwitcher = writable(false);
 export const showQuickCommit = writable(false);
+export const showAppLauncher = writable(false);
+
+// Pending app install (triggers permission review modal)
+export interface PendingInstall {
+  source: 'file' | 'store';
+  listing?: AppListing;
+  appId?: string;
+  path?: string;
+}
+export const pendingInstall = writable<PendingInstall | null>(null);

@@ -1,0 +1,20 @@
+pub mod error;
+pub mod manager;
+pub mod registry;
+pub mod permissions;
+pub mod ipc;
+pub mod tools;
+pub mod hooks;
+pub mod storage;
+pub mod network;
+pub mod agent_bridge;
+pub mod manifest;
+pub mod ui_types;
+pub mod commands;
+pub mod store;
+
+pub use error::TappError;
+pub use manager::AppManager;
+pub use registry::AppRegistry;
+pub use manifest::Manifest;
+pub use store::{AppStore, AppListing, UpdateInfo, StoreConfig};

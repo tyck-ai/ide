@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { open } from '@tauri-apps/plugin-dialog';
@@ -15,8 +15,12 @@
 	import GitStatusBar from '$lib/components/GitStatusBar.svelte';
 	import BranchSwitcher from '$lib/components/BranchSwitcher.svelte';
 	import QuickCommitModal from '$lib/components/QuickCommitModal.svelte';
+	import AppLauncher from '$lib/components/AppLauncher.svelte';
+	import PermissionReview from '$lib/components/PermissionReview.svelte';
+	import { TappContainer } from '$lib/components/tapp';
 	import { projectRoot, resetWorkspace } from '$lib/stores/editor';
-	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, gitViewTab } from '$lib/stores/layout';
+	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab } from '$lib/stores/layout';
+	import { activeApp, tapp } from '$lib/stores/tapp';
 	import { toggleTerminal, terminalVisible } from '$lib/stores/terminal';
 	import { startAgentStatusListener } from '$lib/stores/agentStatus';
 	import { startGitPoller, git } from '$lib/stores/git';
@@ -26,11 +30,13 @@
 	import { activeThemeId, applyTheme, loadCustomThemes, allThemes, builtinThemes } from '$lib/themes';
 
 	let ready = $state(false);
+	let unlistenFns: (() => void)[] = [];
 	let contextWidth = $state(240);
+	let appWidth = $state(300);
 	let insightWidth = $state(320);
-	let dragging = $state<'context' | 'insight' | null>(null);
+	let dragging = $state<'context' | 'insight' | 'app' | null>(null);
 
-	function onMouseDown(handle: 'context' | 'insight') {
+	function onMouseDown(handle: 'context' | 'insight' | 'app') {
 		dragging = handle;
 	}
 
@@ -38,6 +44,8 @@
 		if (!dragging) return;
 		if (dragging === 'context') {
 			contextWidth = Math.max(160, Math.min(500, e.clientX));
+		} else if (dragging === 'app') {
+			appWidth = Math.max(200, Math.min(600, e.clientX));
 		} else {
 			insightWidth = Math.max(200, Math.min(600, window.innerWidth - e.clientX));
 		}
@@ -61,11 +69,20 @@
 			e.preventDefault();
 			showBranchSwitcher.set(true);
 		}
-		// Cmd+G G - Open GitView Changes tab
+		// Cmd+G - Open GitView Changes tab
 		if ((e.ctrlKey || e.metaKey) && e.key === 'g' && !e.shiftKey) {
 			e.preventDefault();
 			gitViewTab.set('changes');
 			showGitView.set(true);
+		}
+		// Cmd+Shift+A (Mac) / Ctrl+Shift+A (Windows/Linux) - Open App Launcher
+		if (e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+			const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+			const modifierPressed = isMac ? e.metaKey : e.ctrlKey;
+			if (modifierPressed) {
+				e.preventDefault();
+				showAppLauncher.set(true);
+			}
 		}
 	}
 
@@ -80,6 +97,14 @@
 		const selected = await open({ directory: true, multiple: false });
 		if (selected && typeof selected === 'string') {
 			await setWorkspace(selected);
+		}
+	}
+
+	function closeActiveApp() {
+		const app = $activeApp;
+		if (app) {
+			tapp.stop(app.id);
+			tapp.setActiveApp(null);
 		}
 	}
 
@@ -126,12 +151,16 @@
 		startAgentStatusListener();
 		ready = true;
 
-		listen('open-settings', () => {
+		unlistenFns.push(await listen('open-settings', () => {
 			showSettings.set(true);
-		});
-		listen('open-folder', () => {
+		}));
+		unlistenFns.push(await listen('open-folder', () => {
 			openFolder();
-		});
+		}));
+	});
+
+	onDestroy(() => {
+		for (const unlisten of unlistenFns) unlisten();
 	});
 </script>
 
@@ -156,19 +185,38 @@
 		</div>
 
 		<div class="main-row" style="grid-template-columns: {
-			$showContext ? `${contextWidth}px 4px ` : ''
-		}1fr 4px {$showInsight ? insightWidth : 0}px">
-			{#if $showContext}
-				<div class="zone context">
-					<ContextZone />
+			$activeApp
+				? $activeApp.layout === 'sidebar'
+					? `${appWidth}px 4px 1fr 4px ${$showInsight ? insightWidth : 0}px`
+					: `1fr 4px ${$showInsight ? insightWidth : 0}px`
+				: `${$showContext ? `${contextWidth}px 4px ` : ''}1fr 4px ${$showInsight ? insightWidth : 0}px`
+		}">
+			{#if $activeApp && $activeApp.layout === 'sidebar'}
+				<div class="zone tapp-zone">
+					<TappContainer appId={$activeApp.id} layout="sidebar" onClose={closeActiveApp} />
 				</div>
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="drag-handle" onmousedown={() => onMouseDown('context')}></div>
-			{/if}
+				<div class="drag-handle" onmousedown={() => onMouseDown('app')}></div>
+				<div class="zone focus">
+					<FocusZone />
+				</div>
+			{:else if $activeApp}
+				<div class="zone tapp-zone">
+					<TappContainer appId={$activeApp.id} onClose={closeActiveApp} />
+				</div>
+			{:else}
+				{#if $showContext}
+					<div class="zone context">
+						<ContextZone />
+					</div>
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div class="drag-handle" onmousedown={() => onMouseDown('context')}></div>
+				{/if}
 
-			<div class="zone focus">
-				<FocusZone />
-			</div>
+				<div class="zone focus">
+					<FocusZone />
+				</div>
+			{/if}
 
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div
@@ -201,6 +249,15 @@
 	{#if $showQuickCommit}
 		<QuickCommitModal />
 	{/if}
+
+{/if}
+
+{#if $showAppLauncher}
+	<AppLauncher />
+{/if}
+
+{#if $pendingInstall}
+	<PermissionReview />
 {/if}
 
 <style>
@@ -266,5 +323,9 @@
 	.drag-hidden {
 		pointer-events: none;
 		cursor: default;
+	}
+
+	.zone.tapp-zone {
+		overflow: auto;
 	}
 </style>

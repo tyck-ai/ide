@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { settings, detectedProviders, updateSettings, refreshProviders } from '$lib/stores/settings';
-	import { showSettings } from '$lib/stores/layout';
+	import { showSettings, pendingInstall } from '$lib/stores/layout';
+	import { tapp, installedApps, storeListings, storeLoading, availableUpdates, type AppInfo, type AppListing } from '$lib/stores/tapp';
+	import { open } from '@tauri-apps/plugin-dialog';
 	import {
 		allThemes,
 		customThemes,
@@ -17,6 +19,7 @@
 	const sections = [
 		{ id: 'appearance', label: 'Appearance' },
 		{ id: 'agents', label: 'Agents' },
+		{ id: 'apps', label: 'Apps' },
 		{ id: 'review', label: 'Review' },
 	] as const;
 
@@ -28,8 +31,15 @@
 	let jsonError = $state('');
 	let savingTheme = $state(false);
 
+	// Apps section state
+	let appsView = $state<'installed' | 'store'>('installed');
+	let storeSearchQuery = $state('');
+	let uninstalling = $state<string | null>(null);
+	let toggling = $state<string | null>(null);
+
 	onMount(() => {
 		loadCustomThemes();
+		tapp.refresh();
 	});
 
 	async function setDefault(providerId: string) {
@@ -102,6 +112,75 @@
 		if ($activeThemeId === themeId) {
 			await selectTheme('catppuccin-mocha');
 		}
+	}
+
+	// Apps section functions
+	async function toggleAppEnabled(app: AppInfo) {
+		toggling = app.id;
+		try {
+			if (app.enabled) {
+				await tapp.disable(app.id);
+			} else {
+				await tapp.enable(app.id);
+			}
+		} catch (e) {
+			console.error('Failed to toggle app:', e);
+		}
+		toggling = null;
+	}
+
+	async function uninstallApp(app: AppInfo) {
+		if (!confirm(`Uninstall "${app.name}"? This cannot be undone.`)) return;
+		uninstalling = app.id;
+		try {
+			await tapp.uninstall(app.id);
+		} catch (e) {
+			console.error('Failed to uninstall app:', e);
+		}
+		uninstalling = null;
+	}
+
+	async function installFromFile() {
+		const selected = await open({
+			filters: [{ name: 'Manifest', extensions: ['json'] }],
+			multiple: false,
+		});
+		if (selected && typeof selected === 'string') {
+			pendingInstall.set({ source: 'file', path: selected });
+		}
+	}
+
+	async function searchStore() {
+		await tapp.searchStore(storeSearchQuery);
+	}
+
+	function initiateStoreInstall(listing: AppListing) {
+		pendingInstall.set({ source: 'store', listing, appId: listing.id });
+	}
+
+	function isInstalled(appId: string): boolean {
+		return $installedApps.some(a => a.id === appId);
+	}
+
+	function hasUpdate(appId: string): boolean {
+		return $availableUpdates.some(u => u.app_id === appId);
+	}
+
+	function formatPermission(perm: string): string {
+		const names: Record<string, string> = {
+			'fs:read': 'Read Files',
+			'fs:write': 'Write Files',
+			'fs:system': 'System Files',
+			'network:fetch': 'Network',
+			'network:unrestricted': 'Full Network',
+			'storage:session': 'Session Storage',
+			'storage:persistent': 'Persistent Storage',
+			'agent:inject': 'Inject Context',
+			'agent:tools': 'AI Tools',
+			'agent:hooks': 'AI Hooks',
+			'agent:spawn': 'Spawn Agents',
+		};
+		return names[perm] || perm;
 	}
 </script>
 
@@ -298,6 +377,150 @@
 					</div>
 				{/each}
 			</div>
+
+		{:else if activeSection === 'apps'}
+			<div class="content-header">
+				<div class="content-title-row">
+					<h1 class="content-title">Apps</h1>
+					<div class="apps-view-toggle">
+						<button 
+							class="view-toggle-btn" 
+							class:active={appsView === 'installed'}
+							onclick={() => appsView = 'installed'}
+						>Installed</button>
+						<button 
+							class="view-toggle-btn" 
+							class:active={appsView === 'store'}
+							onclick={() => { appsView = 'store'; tapp.refreshStore(); }}
+						>Browse Store</button>
+					</div>
+				</div>
+				<p class="content-desc">
+					{#if appsView === 'installed'}
+						Manage installed apps. Enable or disable apps, check for updates, or uninstall.
+					{:else}
+						Browse and install apps from the Tyck app store.
+					{/if}
+				</p>
+			</div>
+
+			{#if appsView === 'installed'}
+				<div class="apps-section">
+					{#if $installedApps.length === 0}
+						<div class="empty-apps">
+							<span class="empty-apps-icon">📦</span>
+							<span class="empty-apps-text">No apps installed yet</span>
+							<span class="empty-apps-hint">Install apps from the store or from a local file</span>
+						</div>
+					{:else}
+						<div class="app-list">
+							{#each $installedApps as app (app.id)}
+								<div class="app-row" class:disabled={!app.enabled}>
+									<div class="app-info">
+										<div class="app-header">
+											<span class="app-name">{app.name}</span>
+											<span class="app-version">v{app.version}</span>
+											{#if app.running}
+												<span class="running-badge">Running</span>
+											{/if}
+											{#if hasUpdate(app.id)}
+												<span class="update-badge">Update Available</span>
+											{/if}
+										</div>
+										{#if app.description}
+											<span class="app-desc">{app.description}</span>
+										{/if}
+									</div>
+									<div class="app-actions">
+										<button
+											class="toggle-switch"
+											class:on={app.enabled}
+											onclick={() => toggleAppEnabled(app)}
+											disabled={toggling === app.id}
+											role="switch"
+											aria-checked={app.enabled}
+										>
+											<span class="toggle-knob"></span>
+										</button>
+										<button 
+											class="uninstall-btn" 
+											onclick={() => uninstallApp(app)}
+											disabled={uninstalling === app.id}
+										>
+											{uninstalling === app.id ? '...' : 'Uninstall'}
+										</button>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+
+					<div class="install-from-file">
+						<button class="install-file-btn" onclick={installFromFile}>
+							Install from File...
+						</button>
+					</div>
+				</div>
+
+			{:else}
+				<div class="store-section">
+					<div class="store-search">
+						<input
+							type="text"
+							class="store-search-input"
+							placeholder="Search apps..."
+							bind:value={storeSearchQuery}
+							onkeydown={(e) => e.key === 'Enter' && searchStore()}
+						/>
+						<button class="store-search-btn" onclick={searchStore} disabled={$storeLoading}>
+							{$storeLoading ? 'Searching...' : 'Search'}
+						</button>
+					</div>
+
+					{#if $storeListings.length === 0}
+						<div class="empty-apps">
+							<span class="empty-apps-icon">🔍</span>
+							<span class="empty-apps-text">No apps found</span>
+							<span class="empty-apps-hint">Try searching for something or refresh the store</span>
+						</div>
+					{:else}
+						<div class="store-grid">
+							{#each $storeListings as listing (listing.id)}
+								<div class="store-card">
+									<div class="store-card-header">
+										<span class="store-card-name">{listing.name}</span>
+										<span class="store-card-version">v{listing.version}</span>
+									</div>
+									<p class="store-card-desc">{listing.description}</p>
+									<div class="store-card-meta">
+										<span class="store-card-author">by {listing.author}</span>
+										{#if listing.downloads > 0}
+											<span class="store-card-downloads">{listing.downloads.toLocaleString()} downloads</span>
+										{/if}
+									</div>
+									<div class="store-card-permissions">
+										{#each listing.permissions.slice(0, 3) as perm}
+											<span class="permission-badge">{formatPermission(perm)}</span>
+										{/each}
+										{#if listing.permissions.length > 3}
+											<span class="permission-badge more">+{listing.permissions.length - 3}</span>
+										{/if}
+									</div>
+									<div class="store-card-actions">
+										{#if isInstalled(listing.id)}
+											<span class="installed-badge">Installed</span>
+										{:else}
+											<button class="install-btn" onclick={() => initiateStoreInstall(listing)}>
+												Install
+											</button>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</main>
 </div>
@@ -754,5 +977,306 @@
 	}
 	.toggle-switch.on .toggle-knob {
 		transform: translateX(20px);
+	}
+
+	/* ── Apps Section ── */
+	.apps-view-toggle {
+		display: flex;
+		gap: 4px;
+		background: var(--color-surface);
+		padding: 3px;
+		border-radius: 8px;
+		border: 1px solid var(--color-border-muted);
+	}
+	.view-toggle-btn {
+		padding: 6px 14px;
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--color-text-muted);
+		background: none;
+		border: none;
+		border-radius: 5px;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.view-toggle-btn:hover {
+		color: var(--color-text);
+	}
+	.view-toggle-btn.active {
+		background: var(--color-base);
+		color: var(--color-text);
+		font-weight: 600;
+	}
+
+	.apps-section, .store-section {
+		max-width: 700px;
+	}
+
+	.empty-apps {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		padding: 48px 24px;
+		background: var(--color-surface);
+		border: 1px dashed var(--color-border-muted);
+		border-radius: 12px;
+		text-align: center;
+	}
+	.empty-apps-icon {
+		font-size: 32px;
+		margin-bottom: 12px;
+	}
+	.empty-apps-text {
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--color-text);
+		margin-bottom: 4px;
+	}
+	.empty-apps-hint {
+		font-size: 12px;
+		color: var(--color-text-subtle);
+	}
+
+	.app-list {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.app-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 14px 16px;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 8px;
+		transition: opacity 0.15s;
+	}
+	.app-row.disabled {
+		opacity: 0.5;
+	}
+	.app-info {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		min-width: 0;
+		flex: 1;
+	}
+	.app-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+	.app-name {
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--color-text);
+	}
+	.app-version {
+		font-size: 11px;
+		color: var(--color-text-subtle);
+		font-family: 'SF Mono', 'Fira Code', monospace;
+	}
+	.app-desc {
+		font-size: 12px;
+		color: var(--color-text-subtle);
+		line-height: 1.4;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.running-badge {
+		font-size: 10px;
+		font-weight: 600;
+		color: var(--color-success);
+		background: color-mix(in srgb, var(--color-success) 15%, transparent);
+		padding: 2px 6px;
+		border-radius: 4px;
+	}
+	.update-badge {
+		font-size: 10px;
+		font-weight: 600;
+		color: var(--color-warning);
+		background: color-mix(in srgb, var(--color-warning) 15%, transparent);
+		padding: 2px 6px;
+		border-radius: 4px;
+	}
+	.app-actions {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		flex-shrink: 0;
+		margin-left: 16px;
+	}
+	.uninstall-btn {
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--color-error);
+		background: none;
+		border: 1px solid color-mix(in srgb, var(--color-error) 25%, transparent);
+		border-radius: 6px;
+		padding: 5px 12px;
+		cursor: pointer;
+	}
+	.uninstall-btn:hover:not(:disabled) {
+		background: color-mix(in srgb, var(--color-error) 10%, transparent);
+		border-color: var(--color-error);
+	}
+	.uninstall-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.install-from-file {
+		margin-top: 16px;
+	}
+	.install-file-btn {
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--color-accent);
+		background: none;
+		border: 1px dashed color-mix(in srgb, var(--color-accent) 40%, transparent);
+		border-radius: 8px;
+		padding: 12px 20px;
+		cursor: pointer;
+		width: 100%;
+	}
+	.install-file-btn:hover {
+		background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+		border-color: var(--color-accent);
+	}
+
+	/* ── Store Section ── */
+	.store-search {
+		display: flex;
+		gap: 8px;
+		margin-bottom: 20px;
+	}
+	.store-search-input {
+		flex: 1;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 8px;
+		padding: 10px 14px;
+		color: var(--color-text);
+		font-size: 13px;
+		outline: none;
+	}
+	.store-search-input:focus {
+		border-color: var(--color-accent);
+	}
+	.store-search-input::placeholder {
+		color: var(--color-text-subtle);
+	}
+	.store-search-btn {
+		background: var(--color-accent);
+		border: none;
+		border-radius: 8px;
+		color: var(--color-base);
+		font-size: 12px;
+		font-weight: 600;
+		padding: 10px 20px;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+	.store-search-btn:hover:not(:disabled) {
+		filter: brightness(1.1);
+	}
+	.store-search-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.store-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+		gap: 12px;
+	}
+	.store-card {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 10px;
+		padding: 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+	.store-card-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.store-card-name {
+		font-size: 14px;
+		font-weight: 600;
+		color: var(--color-text);
+	}
+	.store-card-version {
+		font-size: 11px;
+		color: var(--color-text-subtle);
+		font-family: 'SF Mono', 'Fira Code', monospace;
+	}
+	.store-card-desc {
+		font-size: 12px;
+		color: var(--color-text-muted);
+		line-height: 1.4;
+		margin: 0;
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	.store-card-meta {
+		display: flex;
+		gap: 12px;
+		font-size: 11px;
+		color: var(--color-text-subtle);
+	}
+	.store-card-permissions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+	}
+	.permission-badge {
+		font-size: 10px;
+		font-weight: 500;
+		color: var(--color-text-muted);
+		background: var(--color-overlay);
+		padding: 2px 6px;
+		border-radius: 4px;
+	}
+	.permission-badge.more {
+		color: var(--color-text-subtle);
+	}
+	.store-card-actions {
+		margin-top: auto;
+		padding-top: 8px;
+	}
+	.install-btn {
+		width: 100%;
+		background: var(--color-accent);
+		border: none;
+		border-radius: 6px;
+		color: var(--color-base);
+		font-size: 12px;
+		font-weight: 600;
+		padding: 8px 16px;
+		cursor: pointer;
+	}
+	.install-btn:hover {
+		filter: brightness(1.1);
+	}
+	.installed-badge {
+		display: block;
+		text-align: center;
+		font-size: 11px;
+		font-weight: 600;
+		color: var(--color-success);
+		background: color-mix(in srgb, var(--color-success) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
+		padding: 6px 12px;
+		border-radius: 6px;
 	}
 </style>
