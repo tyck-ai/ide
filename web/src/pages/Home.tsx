@@ -484,7 +484,7 @@ function Download() {
         </div>
 
         <p className="text-center text-sm text-[var(--color-text-muted)] mt-8">
-          Or build from source: <a href="https://github.com/tyck-dev/tyck" target="_blank" rel="noopener noreferrer" className="text-[var(--color-blue)] hover:underline">View on GitHub</a>
+          Or build from source: <a href="https://github.com/tyck-ai/ide" target="_blank" rel="noopener noreferrer" className="text-[var(--color-blue)] hover:underline">View on GitHub</a>
         </p>
       </div>
     </section>

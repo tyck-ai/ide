@@ -5,7 +5,7 @@ description = "An agent agnostic editor"
 authors = ["Tyck Contributors"]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/tyck-dev/tyck"
+repository = "https://github.com/tyck-ai/ide"
 keywords = ["editor", "ide", "ai", "tauri", "wasm"]
 categories = ["development-tools", "text-editors"]
 

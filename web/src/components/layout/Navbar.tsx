@@ -14,7 +14,7 @@ export function Navbar() {
           <a href="#features" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">Features</a>
           <a href="#download" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">Download</a>
           <Link to="/docs" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">Docs</Link>
-          <a href="https://github.com/tyck-dev/tyck" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">GitHub</a>
+          <a href="https://github.com/tyck-ai/ide" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">GitHub</a>
         </div>
 
         <div className="flex items-center gap-3">

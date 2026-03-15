@@ -30,7 +30,7 @@ export function Footer() {
               <ul className="space-y-2">
                 <li><Link to="/docs/themes" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">Themes</Link></li>
                 <li><Link to="/docs/tapp" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">Tapp SDK</Link></li>
-                <li><a href="https://github.com/tyck-dev/tyck" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">GitHub</a></li>
+                <li><a href="https://github.com/tyck-ai/ide" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">GitHub</a></li>
               </ul>
             </div>
             <div>

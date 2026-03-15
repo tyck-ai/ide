@@ -47,7 +47,7 @@ export function DocsLayout() {
           <div className="hidden md:flex items-center gap-8">
             <Link to="/" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">Home</Link>
             <Link to="/docs" className="text-sm text-[var(--color-accent)] font-medium">Docs</Link>
-            <a href="https://github.com/tyck-dev/tyck" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">GitHub</a>
+            <a href="https://github.com/tyck-ai/ide" target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text)] transition-colors">GitHub</a>
           </div>
         </div>
       </nav>

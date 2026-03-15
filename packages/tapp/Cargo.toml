@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "SDK for building Tapp extensions for Tyck IDE"
 license = "MIT"
-repository = "https://github.com/tyck-dev/tapp"
+repository = "https://github.com/tyck-ai/ide"
 keywords = ["tapp", "tyck", "wasm", "extension", "plugin"]
 categories = ["development-tools", "wasm"]
 

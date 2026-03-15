@@ -11,13 +11,13 @@ cargo install tapp-cli
 
 ### From Homebrew (macOS/Linux)
 ```bash
-brew tap tyck-dev/tap
+brew tap tyck-ai/tap
 brew install tapp
 ```
 
 ### From Scoop (Windows)
 ```powershell
-scoop bucket add tyck https://github.com/tyck-dev/scoop-bucket
+scoop bucket add tyck https://github.com/tyck-ai/scoop-bucket
 scoop install tapp
 ```
 
