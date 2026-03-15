@@ -17,6 +17,7 @@
 	import QuickCommitModal from '$lib/components/QuickCommitModal.svelte';
 	import AppLauncher from '$lib/components/AppLauncher.svelte';
 	import PermissionReview from '$lib/components/PermissionReview.svelte';
+	import ToastContainer from '$lib/components/ToastContainer.svelte';
 	import { TappContainer } from '$lib/components/tapp';
 	import { projectRoot, resetWorkspace } from '$lib/stores/editor';
 	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab } from '$lib/stores/layout';
@@ -259,6 +260,8 @@
 {#if $pendingInstall}
 	<PermissionReview />
 {/if}
+
+<ToastContainer />
 
 <style>
 	:global(*) {

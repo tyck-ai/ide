@@ -18,7 +18,8 @@ static WORKTREE_CREATION_LOCK: Mutex<()> = Mutex::new(());
 static DISCOVERY_TASKS: Mutex<Option<HashMap<String, std::sync::Arc<AtomicBool>>>> = Mutex::new(None);
 
 fn get_discovery_tasks() -> std::sync::MutexGuard<'static, Option<HashMap<String, std::sync::Arc<AtomicBool>>>> {
-    let mut guard = DISCOVERY_TASKS.lock().unwrap();
+    // Recover from poisoned lock rather than panicking
+    let mut guard = DISCOVERY_TASKS.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(HashMap::new());
     }

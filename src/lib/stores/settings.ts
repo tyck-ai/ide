@@ -25,14 +25,24 @@ export const detectedProviders = writable<ProviderInfo[]>([]);
 export const settingsLoaded = writable(false);
 
 export async function initSettings(): Promise<void> {
-	const [s, providers] = await Promise.all([
-		invoke<TyckSettings>('load_settings'),
-		invoke<ProviderInfo[]>('detect_providers'),
-	]);
+	try {
+		const [s, providers] = await Promise.all([
+			invoke<TyckSettings>('load_settings').catch(() => ({
+				defaultProvider: 'claude-code',
+				reviewEnabled: true,
+				activeTheme: 'catppuccin-mocha',
+			} as TyckSettings)),
+			invoke<ProviderInfo[]>('detect_providers').catch(() => []),
+		]);
 
-	settings.set(s);
-	detectedProviders.set(providers);
-	settingsLoaded.set(true);
+		settings.set(s);
+		detectedProviders.set(providers);
+	} catch (e) {
+		console.error('Failed to initialize settings:', e);
+	} finally {
+		// Always mark as loaded so the app doesn't hang
+		settingsLoaded.set(true);
+	}
 }
 
 export async function refreshProviders(): Promise<void> {

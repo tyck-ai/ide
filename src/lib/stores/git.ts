@@ -2,6 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { projectRoot } from './editor';
+import { toast } from './toast';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -114,6 +115,20 @@ function createGitStore() {
 
 	function getPath(): string | null {
 		return currentPath;
+	}
+
+	/** Run a git operation, show toast on error, clear error on success */
+	async function gitOp<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+		try {
+			const result = await fn();
+			update(s => ({ ...s, error: null }));
+			return result;
+		} catch (e) {
+			const msg = String(e);
+			update(s => ({ ...s, error: msg }));
+			toast.error(`${label}: ${msg}`);
+			return null;
+		}
 	}
 
 	async function refresh() {
@@ -250,49 +265,37 @@ function createGitStore() {
 	async function stage(files: string[]) {
 		const path = getPath();
 		if (!path) return;
-
-		try {
+		await gitOp('Stage', async () => {
 			await invoke('git_stage', { path, files });
 			await refresh();
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-		}
+		});
 	}
 
 	async function unstage(files: string[]) {
 		const path = getPath();
 		if (!path) return;
-
-		try {
+		await gitOp('Unstage', async () => {
 			await invoke('git_unstage', { path, files });
 			await refresh();
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-		}
+		});
 	}
 
 	async function stageAll() {
 		const path = getPath();
 		if (!path) return;
-
-		try {
+		await gitOp('Stage all', async () => {
 			await invoke('git_stage_all', { path });
 			await refresh();
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-		}
+		});
 	}
 
 	async function discardFile(file: string) {
 		const path = getPath();
 		if (!path) return;
-
-		try {
+		await gitOp('Discard', async () => {
 			await invoke('git_discard_file', { path, file });
 			await refresh();
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-		}
+		});
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -302,16 +305,13 @@ function createGitStore() {
 	async function commit(message: string): Promise<string | null> {
 		const path = getPath();
 		if (!path) return null;
-
-		try {
+		return await gitOp('Commit', async () => {
 			const sha = await invoke<string>('git_commit', { path, message });
+			toast.success('Committed ' + sha.slice(0, 7));
 			await refresh();
 			await refreshCommits();
 			return sha;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return null;
-		}
+		});
 	}
 
 	async function commitAndPush(message: string): Promise<boolean> {
@@ -327,45 +327,35 @@ function createGitStore() {
 	async function push(setUpstream = false): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Push', async () => {
 			await invoke('git_push', { path, setUpstream });
+			toast.success('Pushed successfully');
 			await refresh();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	async function pull(): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Pull', async () => {
 			await invoke('git_pull', { path });
+			toast.success('Pulled successfully');
 			await refresh();
 			await refreshCommits();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	async function fetch(): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Fetch', async () => {
 			await invoke('git_fetch', { path });
 			await refresh();
 			await refreshBranches();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -375,46 +365,34 @@ function createGitStore() {
 	async function checkout(branch: string, create = false): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Checkout', async () => {
 			await invoke('git_checkout', { path, branch, create });
 			await refresh();
 			await refreshBranches();
 			await refreshCommits();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	async function createBranch(name: string, fromRef?: string): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Create branch', async () => {
 			await invoke('git_create_branch', { path, name, fromRef });
 			await refresh();
 			await refreshBranches();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	async function deleteBranch(name: string, force = false): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Delete branch', async () => {
 			await invoke('git_delete_branch', { path, name, force });
 			await refreshBranches();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────
@@ -424,59 +402,43 @@ function createGitStore() {
 	async function stashCreate(message?: string): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Stash', async () => {
 			await invoke('git_stash_create', { path, message });
 			await refresh();
 			await refreshStashes();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	async function stashApply(index: number): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Apply stash', async () => {
 			await invoke('git_stash_apply', { path, index });
 			await refresh();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	async function stashPop(index: number): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Pop stash', async () => {
 			await invoke('git_stash_pop', { path, index });
 			await refresh();
 			await refreshStashes();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	async function stashDrop(index: number): Promise<boolean> {
 		const path = getPath();
 		if (!path) return false;
-
-		try {
+		return (await gitOp('Drop stash', async () => {
 			await invoke('git_stash_drop', { path, index });
 			await refreshStashes();
 			return true;
-		} catch (e) {
-			update(s => ({ ...s, error: String(e) }));
-			return false;
-		}
+		})) ?? false;
 	}
 
 	// ─────────────────────────────────────────────────────────────────────────

@@ -36,6 +36,9 @@ async function startProviderSessionDiscovery(worktreeSessionId: string): Promise
 	}
 }
 
+// Track event listeners per session for cleanup
+const sessionUnlistens = new Map<string, (() => void)[]>();
+
 async function stopProviderSessionDiscovery(worktreeSessionId: string): Promise<void> {
 	try {
 		await invoke('stop_provider_session_discovery', { worktreeSessionId });
@@ -48,6 +51,11 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	const provider = providerId
 		? get(agentProviders).find(p => p.id === providerId) ?? get(activeProvider)
 		: get(activeProvider);
+
+	if (!provider) {
+		throw new Error('No AI provider installed. Install Claude Code, Codex, or another supported provider.');
+	}
+
 	const cwd = get(projectRoot);
 
 	// When resuming, try to find the original worktree that was used for this session
@@ -193,6 +201,10 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 			} catch {
 				// non-critical
 			}
+		}).then(unlisten => {
+			const existing = sessionUnlistens.get(id) ?? [];
+			existing.push(unlisten);
+			sessionUnlistens.set(id, existing);
 		});
 	}
 
@@ -230,6 +242,13 @@ export function switchAgentSession(id: string) {
 }
 
 export async function closeAgentSession(id: string): Promise<void> {
+	// Clean up event listeners for this session
+	const unlistens = sessionUnlistens.get(id);
+	if (unlistens) {
+		for (const unlisten of unlistens) unlisten();
+		sessionUnlistens.delete(id);
+	}
+
 	try {
 		await invoke('kill_terminal', { id });
 	} catch { /* already dead */ }

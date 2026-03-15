@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
+	import { toast } from '$lib/stores/toast';
 	import {
 		activeFile,
 		updateFileContent,
@@ -162,7 +163,7 @@
 				await invoke('write_file', { path: file.path, content: value });
 				markFileSaved(file.path);
 			} catch (e) {
-				console.error('Failed to save:', e);
+				toast.error(`Failed to save ${file.name}: ${e}`);
 			}
 		});
 

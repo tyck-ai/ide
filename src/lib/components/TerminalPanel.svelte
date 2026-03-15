@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import Terminal from './Terminal.svelte';
 	import {
@@ -12,6 +13,7 @@
 
 	let panelHeight = $state(250);
 	let dragging = $state(false);
+	let dragCleanup: (() => void) | null = null;
 
 	function newTerminal() {
 		const id = crypto.randomUUID();
@@ -19,7 +21,7 @@
 	}
 
 	function closeTerminal(id: string) {
-		invoke('kill_terminal', { id });
+		invoke('kill_terminal', { id }).catch(() => { /* already dead */ });
 		removeTerminal(id);
 	}
 
@@ -35,10 +37,20 @@
 			dragging = false;
 			window.removeEventListener('mousemove', onMove);
 			window.removeEventListener('mouseup', onUp);
+			dragCleanup = null;
 		}
 		window.addEventListener('mousemove', onMove);
 		window.addEventListener('mouseup', onUp);
+		// Store cleanup in case component destroys mid-drag
+		dragCleanup = () => {
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		};
 	}
+
+	onDestroy(() => {
+		dragCleanup?.();
+	});
 
 	// Auto-create first terminal if none exist when panel becomes visible
 	$effect(() => {
