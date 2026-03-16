@@ -1,4 +1,5 @@
 import { writable, derived } from 'svelte/store';
+import { isAgentMode } from './settings';
 
 export interface OpenFile {
 	path: string;
@@ -12,6 +13,18 @@ export const activeFilePath = writable<string | null>(null);
 export const projectRoot = writable<string | null>(null);
 export const selection = writable<string>('');
 export const cursorLine = writable<number>(1);
+
+/** Set by agentTerminal when the active session changes. Used to root the file tree. */
+export const activeWorktreePath = writable<string | null>(null);
+
+/** The directory the file tree should show — worktree in agent mode, project root in dev mode */
+export const activeWorkingDirectory = derived(
+	[isAgentMode, activeWorktreePath, projectRoot],
+	([$isAgent, $wt, $root]) => {
+		if ($isAgent && $wt) return $wt;
+		return $root;
+	}
+);
 
 export const activeFile = derived(
 	[openFiles, activeFilePath],
