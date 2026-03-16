@@ -13,7 +13,9 @@
 	} from '$lib/stores/editor';
 	import { pendingEdits, updateEditStatus } from '$lib/stores/agent';
 	import InlineEditOverlay from './InlineEditOverlay.svelte';
-	import { activeSessionId } from '$lib/stores/agentTerminal';
+	import AgentEditBar from './AgentEditBar.svelte';
+	import { activeSessionId, activeSession, trackDevEdit } from '$lib/stores/agentTerminal';
+	import { isAgentMode } from '$lib/stores/settings';
 	import { sessionReview, activeReview, type MergeResult } from '$lib/stores/sessionReview';
 	import { setMonacoInstance, activeTheme, generateMonacoTheme, applyTheme } from '$lib/themes';
 	import type * as Monaco from 'monaco-editor';
@@ -163,6 +165,11 @@
 			try {
 				await invoke('write_file', { path: file.path, content: value });
 				markFileSaved(file.path);
+				// Track edits while agent is paused for context on resume
+				const session = $activeSession;
+				if (session?.status === 'paused') {
+					trackDevEdit(session.id, file.path);
+				}
 			} catch (e) {
 				toast.error(`Failed to save ${file.name}: ${e}`);
 			}
@@ -578,6 +585,7 @@
 				<p>Open a file from the explorer to start editing</p>
 			</div>
 		{/if}
+		<AgentEditBar />
 		<InlineEditOverlay />
 		<div class="editor-container" class:hidden={!$activeFile} bind:this={editorContainer}></div>
 	</div>

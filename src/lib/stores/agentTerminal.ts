@@ -266,6 +266,42 @@ export function updateSessionStatus(id: string, status: SessionStatus) {
 	);
 }
 
+// Track files the developer edits while agent is paused
+const devEditsWhilePaused = new Map<string, Set<string>>();
+
+/** Pause the active agent by sending Ctrl+C */
+export async function pauseAgent(sessionId: string) {
+	try {
+		await invoke('write_terminal', { id: sessionId, data: '\x03' });
+	} catch { /* terminal may be closed */ }
+	devEditsWhilePaused.set(sessionId, new Set());
+	updateSessionStatus(sessionId, 'paused');
+}
+
+/** Track a file the developer edited while the agent was paused */
+export function trackDevEdit(sessionId: string, filePath: string) {
+	const edits = devEditsWhilePaused.get(sessionId);
+	if (edits) edits.add(filePath);
+}
+
+/** Resume a paused agent with context about developer's changes */
+export async function resumeAgent(sessionId: string) {
+	const edits = devEditsWhilePaused.get(sessionId);
+	const changedFiles = edits ? Array.from(edits) : [];
+	devEditsWhilePaused.delete(sessionId);
+
+	let prompt = 'Continue where you left off.';
+	if (changedFiles.length > 0) {
+		const fileList = changedFiles.map(f => f.split('/').pop()).join(', ');
+		prompt += `\n\nNote: I manually edited these files while you were paused: ${fileList}. Please review them before continuing.`;
+	}
+
+	try {
+		await invoke('write_terminal', { id: sessionId, data: prompt + '\n' });
+	} catch { /* terminal may be closed */ }
+	updateSessionStatus(sessionId, 'working');
+}
+
 export async function closeAgentSession(id: string): Promise<void> {
 	// Clean up event listeners for this session
 	const unlistens = sessionUnlistens.get(id);

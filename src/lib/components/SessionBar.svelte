@@ -5,6 +5,8 @@
 		activeSession,
 		switchAgentSession,
 		closeAgentSession,
+		pauseAgent,
+		resumeAgent,
 		type SessionStatus,
 	} from '$lib/stores/agentTerminal';
 	import { activeSessionId } from '$lib/stores/activeSession';
@@ -113,8 +115,18 @@
 
 {#if contextMenuSession}
 	<div class="context-backdrop" onclick={closeContextMenu}></div>
+	{@const menuSession = $agentSessions.find(s => s.id === contextMenuSession)}
 	<div class="context-menu" style="left: {contextMenuPos.x}px; top: {contextMenuPos.y}px">
-		<button class="context-item" onclick={() => { closeAgentSession(contextMenuSession!); closeContextMenu(); }}>
+		{#if menuSession?.status === 'paused'}
+			<button class="context-item" onclick={() => { resumeAgent(contextMenuSession!); closeContextMenu(); }}>
+				Resume Agent
+			</button>
+		{:else if menuSession?.status === 'working'}
+			<button class="context-item" onclick={() => { pauseAgent(contextMenuSession!); closeContextMenu(); }}>
+				Pause Agent
+			</button>
+		{/if}
+		<button class="context-item danger" onclick={() => { closeAgentSession(contextMenuSession!); closeContextMenu(); }}>
 			Close Session
 		</button>
 	</div>
@@ -271,5 +283,8 @@
 	}
 	.context-item:hover {
 		background: var(--color-overlay);
+	}
+	.context-item.danger {
+		color: var(--color-error, #f85149);
 	}
 </style>

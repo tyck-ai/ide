@@ -37,6 +37,8 @@ export interface AgentSession {
 
 export const agentSession = writable<AgentSession | null>(null);
 export const pendingEdits = writable<PendingEdit[]>([]);
+/** The file the agent is currently editing (set during tool calls, cleared after) */
+export const agentActiveFile = writable<string | null>(null);
 
 let eventUnlisten: (() => void) | null = null;
 
@@ -90,6 +92,8 @@ function processEvent(data: any) {
 								? (() => { try { return JSON.parse(block.input); } catch { return null; } })()
 								: block.input;
 							if (input) {
+								// Track which file the agent is actively editing
+								agentActiveFile.set(input.file_path || null);
 								if (get(isDevMode)) {
 									// Dev mode: route to inline review system
 									addEdit({
@@ -120,7 +124,9 @@ function processEvent(data: any) {
 			}
 
 			case 'tool': {
-				// Tool result from Claude Code
+				// Tool result — agent finished editing the file
+				agentActiveFile.set(null);
+
 				const tool = data.tool;
 				if (!tool) break;
 
@@ -147,6 +153,7 @@ function processEvent(data: any) {
 			}
 
 			case 'result': {
+				agentActiveFile.set(null);
 				// Final result — add text if no assistant content was shown yet
 				if (data.result && typeof data.result === 'string' && data.result.trim()) {
 					const hasAssistantText = session.turns.some(
