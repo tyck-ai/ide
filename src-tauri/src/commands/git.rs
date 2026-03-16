@@ -36,6 +36,32 @@ fn is_relevant_git_path(path: &std::path::Path) -> bool {
 }
 
 #[tauri::command]
+pub fn git_is_repo(path: String) -> bool {
+    PathBuf::from(&path).join(".git").is_dir()
+}
+
+#[tauri::command]
+pub fn git_init_repo(path: String) -> Result<(), String> {
+    let run = |args: &[&str]| -> Result<(), String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&path)
+            .output()
+            .map_err(|e| format!("Failed to run git: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git {} failed: {}", args[0], stderr));
+        }
+        Ok(())
+    };
+
+    run(&["init"])?;
+    run(&["add", "-A"])?;
+    run(&["commit", "-m", "Initial commit", "--allow-empty"])?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn watch_git_directory(app: AppHandle, path: String) -> Result<(), String> {
     let git_path = PathBuf::from(&path).join(".git");
     if !git_path.is_dir() {

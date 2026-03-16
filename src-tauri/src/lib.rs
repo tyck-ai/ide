@@ -90,6 +90,8 @@ pub fn run() {
             fs::watch_directory,
             fs::stop_watching,
             git::git_status,
+            git::git_is_repo,
+            git::git_init_repo,
             git::git_full_status,
             git::git_branches,
             git::git_checkout,

@@ -1,17 +1,23 @@
 <script lang="ts">
 	import { get } from 'svelte/store';
+	import { invoke } from '@tauri-apps/api/core';
 	import { isAgentMode, isDevMode, settings, updateSettings } from '$lib/stores/settings';
 	import { agentSessions } from '$lib/stores/agentTerminal';
+	import { projectRoot } from '$lib/stores/editor';
+	import { toast } from '$lib/stores/toast';
+	import { startGitPoller } from '$lib/stores/git';
 
 	let showDropdown = $state(false);
 	let showWarning = $state(false);
+	let showGitInit = $state(false);
 	let pendingMode = $state<'dev' | 'agent' | null>(null);
+	let initializingGit = $state(false);
 
 	function toggleDropdown() {
 		showDropdown = !showDropdown;
 	}
 
-	function selectMode(mode: 'dev' | 'agent') {
+	async function selectMode(mode: 'dev' | 'agent') {
 		showDropdown = false;
 
 		if (mode === $settings.workspaceMode) return;
@@ -23,7 +29,35 @@
 			return;
 		}
 
+		// Check for git repo when switching to agent mode
+		if (mode === 'agent') {
+			const cwd = get(projectRoot);
+			if (cwd) {
+				const isRepo = await invoke<boolean>('git_is_repo', { path: cwd });
+				if (!isRepo) {
+					showGitInit = true;
+					return;
+				}
+			}
+		}
+
 		updateSettings({ workspaceMode: mode });
+	}
+
+	async function initGitAndSwitch() {
+		const cwd = get(projectRoot);
+		if (!cwd) return;
+		initializingGit = true;
+		try {
+			await invoke('git_init_repo', { path: cwd });
+			toast.success('Git initialized. Agent Mode ready.');
+			startGitPoller(cwd);
+			updateSettings({ workspaceMode: 'agent' });
+		} catch (e) {
+			toast.error(`Failed to initialize git: ${e}`);
+		}
+		initializingGit = false;
+		showGitInit = false;
 	}
 
 	function confirmSwitch() {
@@ -82,6 +116,26 @@
 			<div class="warning-actions">
 				<button class="warning-btn cancel" onclick={cancelSwitch}>Cancel</button>
 				<button class="warning-btn confirm" onclick={confirmSwitch}>Switch Anyway</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if showGitInit}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div class="warning-backdrop" onclick={() => showGitInit = false}>
+		<div class="warning-modal" onclick={(e) => e.stopPropagation()}>
+			<div class="warning-title">Agent Mode requires git</div>
+			<div class="warning-text">
+				This project isn't a git repository. Initialize git to use Agent Mode?
+				<br /><br />
+				This will run <code>git init</code> and create an initial commit with all existing files.
+			</div>
+			<div class="warning-actions">
+				<button class="warning-btn cancel" onclick={() => showGitInit = false}>Stay in Dev Mode</button>
+				<button class="warning-btn confirm" onclick={initGitAndSwitch} disabled={initializingGit}>
+					{initializingGit ? 'Initializing...' : 'Initialize Git'}
+				</button>
 			</div>
 		</div>
 	</div>
