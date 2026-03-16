@@ -10,6 +10,7 @@
 		type SessionStatus,
 	} from '$lib/stores/agentTerminal';
 	import { activeSessionId } from '$lib/stores/activeSession';
+	import { peekingMain } from '$lib/stores/editor';
 	import NewSessionModal from './NewSessionModal.svelte';
 	import SessionHistory from './SessionHistory.svelte';
 
@@ -46,6 +47,7 @@
 	}
 
 	function onTabClick(id: string) {
+		peekingMain.set(false);
 		switchAgentSession(id);
 	}
 
@@ -74,6 +76,15 @@
 	<button class="mode-indicator agent" onclick={() => {/* mode dropdown handled by ModeBar logic */}}>
 		<span class="mode-dot"></span>
 		Agent
+	</button>
+
+	<button
+		class="peek-btn"
+		class:active={$peekingMain}
+		onclick={() => peekingMain.update(v => !v)}
+		title="Peek at main workspace (read-only)"
+	>
+		main ↗
 	</button>
 
 	<div class="session-divider"></div>
@@ -169,6 +180,24 @@
 		height: 6px;
 		border-radius: 50%;
 		background: var(--color-accent);
+	}
+	.peek-btn {
+		background: none;
+		border: none;
+		color: var(--color-text-subtle);
+		font-size: 10px;
+		cursor: pointer;
+		padding: 2px 8px;
+		border-radius: 3px;
+		margin-left: 4px;
+	}
+	.peek-btn:hover {
+		color: var(--color-text);
+		background: var(--color-overlay);
+	}
+	.peek-btn.active {
+		color: var(--color-accent);
+		background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 	}
 	.session-divider {
 		width: 1px;

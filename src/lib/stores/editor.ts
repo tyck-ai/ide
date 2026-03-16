@@ -17,10 +17,14 @@ export const cursorLine = writable<number>(1);
 /** Set by agentTerminal when the active session changes. Used to root the file tree. */
 export const activeWorktreePath = writable<string | null>(null);
 
+/** When true, ContextZone shows main workspace (read-only) in agent mode */
+export const peekingMain = writable<boolean>(false);
+
 /** The directory the file tree should show — worktree in agent mode, project root in dev mode */
 export const activeWorkingDirectory = derived(
-	[isAgentMode, activeWorktreePath, projectRoot],
-	([$isAgent, $wt, $root]) => {
+	[isAgentMode, activeWorktreePath, projectRoot, peekingMain],
+	([$isAgent, $wt, $root, $peeking]) => {
+		if ($peeking) return $root;
 		if ($isAgent && $wt) return $wt;
 		return $root;
 	}
