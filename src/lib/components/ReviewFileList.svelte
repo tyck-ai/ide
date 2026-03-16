@@ -16,11 +16,46 @@
 		}
 	});
 
+	/** Get list of rejected file paths from the review decisions */
+	function getRejectedFiles(): string[] {
+		if (!$activeReview) return [];
+		const rejected: string[] = [];
+		for (const [path, decision] of $activeReview.fileDecisions) {
+			if (decision === 'rejected') rejected.push(path);
+		}
+		return rejected;
+	}
+
+	/** Revert rejected files on the agent branch before merge/push */
+	async function revertRejectedFiles(worktreePath: string) {
+		const rejected = getRejectedFiles();
+		if (rejected.length === 0) return;
+		await invoke('git_revert_files', { path: worktreePath, files: rejected });
+	}
+
+	let showPrModal = $state(false);
+	let prTitle = $state('');
+	let prBody = $state('');
+
+	function openPrModal() {
+		const session = $activeSession;
+		if (!session) return;
+		prTitle = session.instructions || session.label || session.branchName;
+		prBody = `## Changes\n\nAgent session: ${session.label}\nBranch: ${session.branchName}\n\n${
+			($activeReview?.diffs ?? []).map(d => `- ${d.status === 'A' ? 'Added' : d.status === 'D' ? 'Deleted' : 'Modified'} \`${d.path}\``).join('\n')
+		}`;
+		showPrModal = true;
+	}
+
 	async function mergeToMain() {
 		const session = $activeSession;
 		if (!session || !$projectRoot || merging) return;
 		merging = true;
 		try {
+			// Revert rejected files on the agent branch before merging
+			if (session.worktreePath) {
+				await revertRejectedFiles(session.worktreePath);
+			}
 			const message = `Agent changes from ${session.branchName}\n\nSession: ${session.label}`;
 			await invoke('git_merge_branch', {
 				path: $projectRoot,
@@ -39,18 +74,22 @@
 		if (!session || !$projectRoot || pushing) return;
 		pushing = true;
 		try {
+			// Revert rejected files on the agent branch before pushing
+			if (session.worktreePath) {
+				await revertRejectedFiles(session.worktreePath);
+			}
 			await invoke('git_push_branch', {
 				path: session.worktreePath || $projectRoot,
 				branch: session.branchName,
 			});
 			toast.success(`Pushed ${session.branchName}`);
 
-			// Try to create PR via gh CLI
+			// Create PR via gh CLI
 			try {
 				const prUrl = await invoke<string>('gh_create_pr', {
 					path: session.worktreePath || $projectRoot,
-					title: session.instructions || session.label,
-					body: `Agent session: ${session.label}\nBranch: ${session.branchName}`,
+					title: prTitle,
+					body: prBody,
 					base: 'main',
 					head: session.branchName,
 				});
@@ -62,6 +101,7 @@
 			toast.error(`Push failed: ${e}`);
 		}
 		pushing = false;
+		showPrModal = false;
 	}
 
 	const modified = $derived(($activeReview?.diffs ?? []).filter(d => d.status === 'M'));
@@ -190,13 +230,36 @@
 				{merging ? 'Merging...' : 'Merge to Main'}
 			</button>
 			{#if hasRemote}
-				<button class="review-btn push" onclick={pushAndPr} disabled={pushing || totalPending === 0}>
+				<button class="review-btn push" onclick={openPrModal} disabled={pushing || totalPending === 0}>
 					{pushing ? 'Pushing...' : 'Push & PR'}
 				</button>
 			{/if}
 		</div>
 	{/if}
 </div>
+
+{#if showPrModal}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div class="pr-backdrop" onclick={() => showPrModal = false}>
+		<div class="pr-modal" onclick={(e) => e.stopPropagation()}>
+			<div class="pr-title">Create Pull Request</div>
+			<label class="pr-field">
+				<span class="pr-label">Title</span>
+				<input class="pr-input" bind:value={prTitle} />
+			</label>
+			<label class="pr-field">
+				<span class="pr-label">Description</span>
+				<textarea class="pr-input pr-textarea" bind:value={prBody} rows="6"></textarea>
+			</label>
+			<div class="pr-actions">
+				<button class="pr-btn cancel" onclick={() => showPrModal = false}>Cancel</button>
+				<button class="pr-btn create" onclick={pushAndPr} disabled={pushing}>
+					{pushing ? 'Creating...' : 'Push & Create PR'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.review-list {
@@ -301,4 +364,74 @@
 		background: var(--color-accent);
 		color: white;
 	}
+
+	.pr-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0,0,0,0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 300;
+	}
+	.pr-modal {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 12px;
+		padding: 24px;
+		width: 480px;
+		max-width: 90vw;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+	}
+	.pr-title {
+		font-size: 16px;
+		font-weight: 600;
+	}
+	.pr-field {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.pr-label {
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--color-text-secondary);
+	}
+	.pr-input {
+		padding: 8px 12px;
+		background: var(--color-base);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 6px;
+		color: var(--color-text);
+		font-size: 13px;
+		font-family: inherit;
+	}
+	.pr-input:focus { outline: none; border-color: var(--color-accent); }
+	.pr-textarea { resize: vertical; min-height: 100px; }
+	.pr-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 4px;
+	}
+	.pr-btn {
+		padding: 8px 18px;
+		border-radius: 6px;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.pr-btn.cancel {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		color: var(--color-text);
+	}
+	.pr-btn.create {
+		background: var(--color-accent);
+		border: none;
+		color: white;
+	}
+	.pr-btn.create:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

@@ -2,6 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { activeProvider, agentProviders } from './agentProvider';
 import { projectRoot, activeWorktreePath } from './editor';
+import { switchSessionContext, clearSessionState } from './sessionContext';
 import { agentStatusConnected, agentStatus, switchActiveStatus, recordStatus } from './agentStatus';
 import { checkpoint } from './checkpoint';
 import { sessionReview } from './sessionReview';
@@ -249,6 +250,9 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 }
 
 export function switchAgentSession(id: string) {
+	// Save current session's UI state and restore the new one
+	switchSessionContext(id);
+
 	activeSessionId.set(id);
 	switchActiveStatus(id);
 
@@ -303,6 +307,9 @@ export async function resumeAgent(sessionId: string) {
 }
 
 export async function closeAgentSession(id: string): Promise<void> {
+	// Clean up session UI state
+	clearSessionState(id);
+
 	// Clean up event listeners for this session
 	const unlistens = sessionUnlistens.get(id);
 	if (unlistens) {

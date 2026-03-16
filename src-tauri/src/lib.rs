@@ -92,6 +92,7 @@ pub fn run() {
             git::git_status,
             git::git_is_repo,
             git::git_init_repo,
+            git::git_revert_files,
             git::git_has_remote,
             git::git_push_branch,
             git::git_merge_branch,

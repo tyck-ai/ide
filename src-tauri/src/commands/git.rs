@@ -61,6 +61,41 @@ pub fn git_init_repo(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Revert specific files on a branch to their base state (undo agent changes).
+/// Used to strip rejected files before merge/push.
+#[tauri::command]
+pub fn git_revert_files(path: String, files: Vec<String>) -> Result<(), String> {
+    for file in &files {
+        let output = Command::new("git")
+            .args(["checkout", "HEAD~1", "--", file])
+            .current_dir(&path)
+            .output()
+            .map_err(|e| format!("Failed to revert {}: {}", file, e))?;
+
+        if !output.status.success() {
+            // If HEAD~1 doesn't exist (single commit), try removing the file
+            let _ = Command::new("git")
+                .args(["rm", "-f", "--", file])
+                .current_dir(&path)
+                .output();
+        }
+    }
+
+    // Commit the reverts
+    if !files.is_empty() {
+        let _ = Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(&path)
+            .output();
+        let _ = Command::new("git")
+            .args(["commit", "-m", "Revert rejected files", "--allow-empty"])
+            .current_dir(&path)
+            .output();
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn git_has_remote(path: String) -> bool {
     Command::new("git")
