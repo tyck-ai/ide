@@ -3,7 +3,7 @@
 	import { agentStatus, agentStatusConnected } from '$lib/stores/agentStatus';
 	import { activeSessionId } from '$lib/stores/agentTerminal';
 	import { sessionReview, activeReview, hasActiveReview } from '$lib/stores/sessionReview';
-	import { settings } from '$lib/stores/settings';
+	import { isAgentMode } from '$lib/stores/settings';
 
 	function switchTo(path: string) {
 		activeFilePath.set(path);
@@ -34,7 +34,7 @@
 	<!-- Left: View tabs -->
 	<div class="section-left">
 		<div class="view-toggle" role="group">
-			{#if $settings.reviewEnabled && $hasActiveReview}
+			{#if $isAgentMode && $hasActiveReview}
 				{@const review = $activeReview}
 				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 				<button
@@ -47,7 +47,7 @@
 			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 			<button
 				class="view-toggle-btn"
-				class:active={!$settings.reviewEnabled || !$hasActiveReview || !$activeReview?.reviewMode}
+				class:active={!$isAgentMode || !$hasActiveReview || !$activeReview?.reviewMode}
 				onclick={() => { if ($activeReview?.reviewMode && $activeSessionId) sessionReview.exitReviewMode($activeSessionId); }}
 			>Editor</button>
 		</div>

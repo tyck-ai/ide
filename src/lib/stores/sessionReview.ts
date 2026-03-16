@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { activeSessionId } from './activeSession';
 import { openFiles, updateFileContent } from './editor';
-import { settings } from './settings';
+import { isAgentMode } from './settings';
 
 export interface WorktreeFileDiff {
 	path: string;
@@ -73,7 +73,7 @@ function createSessionReviewStore() {
 
 	/** Register a new session with its worktree. Called after worktree creation. */
 	async function registerSession(sessionId: string, mainCwd: string, worktreePath: string) {
-		const reviewEnabled = get(settings).reviewEnabled;
+		const agentMode = get(isAgentMode);
 		
 		update(map => {
 			const next = new Map(map);
@@ -106,8 +106,8 @@ function createSessionReviewStore() {
 
 		await refreshDiffs(sessionId);
 		
-		// Auto-enter review mode when reviewEnabled setting is on
-		if (reviewEnabled) {
+		// Auto-enter review mode when agent mode is on
+		if (agentMode) {
 			await enterReviewMode(sessionId);
 		}
 	}

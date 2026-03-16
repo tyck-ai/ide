@@ -5,7 +5,7 @@ import { projectRoot } from './editor';
 import { agentStatusConnected, agentStatus, switchActiveStatus, recordStatus } from './agentStatus';
 import { checkpoint } from './checkpoint';
 import { sessionReview } from './sessionReview';
-import { settings } from './settings';
+import { isAgentMode } from './settings';
 import { activeSessionId } from './activeSession';
 import { listen } from '@tauri-apps/api/event';
 
@@ -107,7 +107,7 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 
 	// Build args — get provider-specific resume args from Rust
 	const args = [...provider.args];
-	const reviewEnabled = get(settings).reviewEnabled;
+	const agentMode = get(isAgentMode);
 	
 	// Pass --resume when resuming an existing session
 	// Always use the Claude session ID (resumeSessionId), not the worktree ID
@@ -129,7 +129,7 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	// Create worktree for agent isolation (only when review mode is enabled and cwd is a git repo)
 	let agentCwd = cwd;
 
-	if (cwd && reviewEnabled) {
+	if (cwd && agentMode) {
 		try {
 			// If we already found an existing worktree, use it directly
 			if (existingWorktreePath) {
@@ -189,12 +189,12 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 
 	// For new sessions, start background discovery of the provider's session ID
 	// This runs in the backend and survives frontend crashes
-	if (cwd && reviewEnabled && !existingWorktreePath) {
+	if (cwd && agentMode && !existingWorktreePath) {
 		startProviderSessionDiscovery(id);
 	}
 
 	// On terminal exit: refresh worktree diffs
-	if (cwd && reviewEnabled) {
+	if (cwd && agentMode) {
 		listen(`pty-exit-${id}`, async () => {
 			try {
 				await sessionReview.refreshDiffs(id);
