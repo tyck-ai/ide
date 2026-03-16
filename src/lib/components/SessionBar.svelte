@@ -12,9 +12,13 @@
 	import { activeSessionId } from '$lib/stores/activeSession';
 	import { peekingMain } from '$lib/stores/editor';
 	import NewSessionModal from './NewSessionModal.svelte';
+	import NewMissionModal from './NewMissionModal.svelte';
 	import SessionHistory from './SessionHistory.svelte';
+	import { activeMission } from '$lib/stores/missions';
 
 	let showNewModal = $state(false);
+	let showMissionModal = $state(false);
+	let showNewMenu = $state(false);
 	let showHistory = $state(false);
 	let contextMenuSession = $state<string | null>(null);
 	let contextMenuPos = $state({ x: 0, y: 0 });
@@ -115,13 +119,32 @@
 	</div>
 
 	<div class="session-actions">
-		<button class="action-btn" onclick={() => showNewModal = true} title="New agent session">
-			+
-		</button>
+		<div class="new-menu-wrapper">
+			<button class="action-btn" onclick={() => showNewMenu = !showNewMenu} title="New session or mission">
+				+
+			</button>
+			{#if showNewMenu}
+				<div class="new-menu-backdrop" onclick={() => showNewMenu = false}></div>
+				<div class="new-menu">
+					<button class="new-menu-item" onclick={() => { showNewMenu = false; showNewModal = true; }}>
+						<span class="new-menu-icon">▶</span> New Session
+					</button>
+					<button class="new-menu-item" onclick={() => { showNewMenu = false; showMissionModal = true; }}>
+						<span class="new-menu-icon">🎯</span> New Mission
+					</button>
+				</div>
+			{/if}
+		</div>
 		<button class="action-btn" onclick={() => showHistory = !showHistory} title="Session history">
 			⏱
 		</button>
 	</div>
+
+	{#if $activeMission}
+		<div class="mission-indicator" title={$activeMission.description}>
+			🎯 {$activeMission.tasks.filter(t => t.status === 'done').length}/{$activeMission.tasks.length}
+		</div>
+	{/if}
 </div>
 
 {#if contextMenuSession}
@@ -145,6 +168,10 @@
 
 {#if showNewModal}
 	<NewSessionModal onClose={() => showNewModal = false} />
+{/if}
+
+{#if showMissionModal}
+	<NewMissionModal onClose={() => showMissionModal = false} />
 {/if}
 
 {#if showHistory}
@@ -281,6 +308,59 @@
 	.action-btn:hover {
 		background: var(--color-overlay);
 		color: var(--color-text);
+	}
+
+	.new-menu-wrapper {
+		position: relative;
+	}
+	.new-menu-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 99;
+	}
+	.new-menu {
+		position: absolute;
+		top: 100%;
+		right: 0;
+		z-index: 100;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 6px;
+		box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+		padding: 4px;
+		min-width: 160px;
+		margin-top: 4px;
+	}
+	.new-menu-item {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		padding: 6px 12px;
+		background: none;
+		border: none;
+		border-radius: 4px;
+		color: var(--color-text);
+		font-size: 12px;
+		cursor: pointer;
+		text-align: left;
+	}
+	.new-menu-item:hover {
+		background: var(--color-overlay);
+	}
+	.new-menu-icon {
+		font-size: 11px;
+	}
+	.mission-indicator {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		padding: 2px 8px;
+		font-size: 10px;
+		color: var(--color-accent);
+		font-weight: 600;
+		flex-shrink: 0;
+		margin-left: 4px;
 	}
 
 	.context-backdrop {
