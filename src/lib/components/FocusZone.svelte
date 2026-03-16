@@ -12,6 +12,7 @@
 		cursorLine as cursorLineStore,
 	} from '$lib/stores/editor';
 	import { pendingEdits, updateEditStatus } from '$lib/stores/agent';
+	import InlineEditOverlay from './InlineEditOverlay.svelte';
 	import { activeSessionId } from '$lib/stores/agentTerminal';
 	import { sessionReview, activeReview, type MergeResult } from '$lib/stores/sessionReview';
 	import { setMonacoInstance, activeTheme, generateMonacoTheme, applyTheme } from '$lib/themes';
@@ -577,13 +578,8 @@
 				<p>Open a file from the explorer to start editing</p>
 			</div>
 		{/if}
+		<InlineEditOverlay />
 		<div class="editor-container" class:hidden={!$activeFile} bind:this={editorContainer}></div>
-		{#if $activeFile && $pendingEdits.some(e => e.filePath === $activeFile?.path && e.status === 'pending')}
-			<div class="diff-bar">
-				<span class="diff-bar-text">Pending changes</span>
-				<span class="diff-bar-hint">Cmd+Shift+Enter to accept | Esc to reject</span>
-			</div>
-		{/if}
 	</div>
 </div>
 

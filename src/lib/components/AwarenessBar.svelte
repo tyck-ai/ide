@@ -3,7 +3,8 @@
 	import { agentStatus, agentStatusConnected } from '$lib/stores/agentStatus';
 	import { activeSessionId } from '$lib/stores/agentTerminal';
 	import { sessionReview, activeReview, hasActiveReview } from '$lib/stores/sessionReview';
-	import { isAgentMode } from '$lib/stores/settings';
+	import { isAgentMode, isDevMode } from '$lib/stores/settings';
+	import { pendingEditCount } from '$lib/stores/devModeEdits';
 
 	function switchTo(path: string) {
 		activeFilePath.set(path);
@@ -49,7 +50,7 @@
 				class="view-toggle-btn"
 				class:active={!$isAgentMode || !$hasActiveReview || !$activeReview?.reviewMode}
 				onclick={() => { if ($activeReview?.reviewMode && $activeSessionId) sessionReview.exitReviewMode($activeSessionId); }}
-			>Editor</button>
+			>Editor{#if $isDevMode && $pendingEditCount > 0}<span class="toggle-count">{$pendingEditCount}</span>{/if}</button>
 		</div>
 	</div>
 

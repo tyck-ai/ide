@@ -1,6 +1,8 @@
 import { writable, get } from 'svelte/store';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { isDevMode } from './settings';
+import { addEdit } from './devModeEdits';
 
 export type AgentBlockType = 'text' | 'tool_use' | 'tool_result' | 'thinking';
 
@@ -88,13 +90,24 @@ function processEvent(data: any) {
 								? (() => { try { return JSON.parse(block.input); } catch { return null; } })()
 								: block.input;
 							if (input) {
-								pendingEdits.update(edits => [...edits, {
-									filePath: input.file_path || '',
-									oldContent: input.old_string || '',
-									newContent: input.new_string || input.content || '',
-									toolId: block.id || '',
-									status: 'pending' as const,
-								}]);
+								if (get(isDevMode)) {
+									// Dev mode: route to inline review system
+									addEdit({
+										id: block.id || crypto.randomUUID(),
+										filePath: input.file_path || '',
+										oldContent: block.name === 'Edit' ? (input.old_string || null) : null,
+										newContent: input.new_string || input.content || '',
+									});
+								} else {
+									// Agent mode: track as pending edits (worktree-based review)
+									pendingEdits.update(edits => [...edits, {
+										filePath: input.file_path || '',
+										oldContent: input.old_string || '',
+										newContent: input.new_string || input.content || '',
+										toolId: block.id || '',
+										status: 'pending' as const,
+									}]);
+								}
 							}
 						}
 					}
