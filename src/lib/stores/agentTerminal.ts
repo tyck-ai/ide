@@ -11,12 +11,19 @@ import { listen } from '@tauri-apps/api/event';
 
 export { activeSessionId } from './activeSession';
 
+export type SessionStatus = 'working' | 'idle' | 'done' | 'error' | 'paused';
+
 export interface AgentSession {
 	id: string;
 	label: string;
+	branchName: string;
+	worktreePath: string;
 	providerId: string;
 	statusFile: string;
+	status: SessionStatus;
+	instructions?: string;
 	resumeSessionId?: string;
+	createdAt: number;
 }
 
 export const agentSessions = writable<AgentSession[]>([]);
@@ -225,9 +232,13 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	const session: AgentSession = {
 		id,
 		label,
+		branchName: `tyck/${provider.id}/${id.slice(0, 8)}`,
+		worktreePath: agentCwd || cwd || '',
 		providerId: provider.id,
 		statusFile,
+		status: 'working',
 		resumeSessionId,
+		createdAt: Date.now(),
 	};
 
 	agentSessions.update(s => [...s, session]);
@@ -239,6 +250,12 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 export function switchAgentSession(id: string) {
 	activeSessionId.set(id);
 	switchActiveStatus(id);
+}
+
+export function updateSessionStatus(id: string, status: SessionStatus) {
+	agentSessions.update(sessions =>
+		sessions.map(s => s.id === id ? { ...s, status } : s)
+	);
 }
 
 export async function closeAgentSession(id: string): Promise<void> {

@@ -19,6 +19,8 @@
 	import PermissionReview from '$lib/components/PermissionReview.svelte';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
 	import ModeBar from '$lib/components/ModeBar.svelte';
+	import SessionBar from '$lib/components/SessionBar.svelte';
+	import { isAgentMode } from '$lib/stores/settings';
 	import { TappContainer } from '$lib/components/tapp';
 	import { projectRoot, resetWorkspace } from '$lib/stores/editor';
 	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab } from '$lib/stores/layout';
@@ -183,7 +185,11 @@
 {:else}
 	<div class="app-layout" class:resizing={dragging !== null}>
 		<div class="mode-row">
-			<ModeBar />
+			{#if $isAgentMode}
+				<SessionBar />
+			{:else}
+				<ModeBar />
+			{/if}
 		</div>
 		<div class="awareness-row">
 			<AwarenessBar />
