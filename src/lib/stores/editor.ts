@@ -70,6 +70,17 @@ export function closeFile(path: string) {
 	});
 }
 
+/** Files visible in the current context (filtered by worktree in agent mode) */
+export const visibleFiles = derived(
+	[openFiles, isAgentMode, activeWorktreePath],
+	([$files, $isAgent, $wt]) => {
+		if ($isAgent && $wt) {
+			return $files.filter(f => f.path.startsWith($wt));
+		}
+		return $files;
+	}
+);
+
 /** Close all files and reset workspace state. */
 export function resetWorkspace() {
 	openFiles.set([]);

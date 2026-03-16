@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { activeProvider, agentProviders } from './agentProvider';
-import { projectRoot } from './editor';
+import { projectRoot, activeWorktreePath } from './editor';
 import { agentStatusConnected, agentStatus, switchActiveStatus, recordStatus } from './agentStatus';
 import { checkpoint } from './checkpoint';
 import { sessionReview } from './sessionReview';
@@ -243,6 +243,7 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 
 	agentSessions.update(s => [...s, session]);
 	activeSessionId.set(id);
+	activeWorktreePath.set(session.worktreePath || null);
 
 	return id;
 }
@@ -250,6 +251,13 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 export function switchAgentSession(id: string) {
 	activeSessionId.set(id);
 	switchActiveStatus(id);
+
+	// Update the working directory for the file tree
+	const sessions = get(agentSessions);
+	const session = sessions.find(s => s.id === id);
+	if (session?.worktreePath) {
+		activeWorktreePath.set(session.worktreePath);
+	}
 }
 
 export function updateSessionStatus(id: string, status: SessionStatus) {

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { openFiles, activeFilePath, closeFile } from '$lib/stores/editor';
+	import { openFiles, activeFilePath, closeFile, visibleFiles } from '$lib/stores/editor';
 	import { agentStatus, agentStatusConnected } from '$lib/stores/agentStatus';
-	import { activeSessionId } from '$lib/stores/agentTerminal';
+	import { activeSessionId, activeSession } from '$lib/stores/agentTerminal';
 	import { sessionReview, activeReview, hasActiveReview } from '$lib/stores/sessionReview';
 	import { isAgentMode, isDevMode } from '$lib/stores/settings';
 	import { pendingEditCount } from '$lib/stores/devModeEdits';
@@ -54,9 +54,14 @@
 		</div>
 	</div>
 
-	<!-- Center: File tabs -->
+	<!-- Center: File tabs + session info -->
+	{#if $isAgentMode && $activeSession}
+		<div class="session-info">
+			<span class="branch-label">⎇ {$activeSession.branchName}</span>
+		</div>
+	{/if}
 	<div class="tabs">
-		{#each $openFiles as file (file.path)}
+		{#each ($isAgentMode ? $visibleFiles : $openFiles) as file (file.path)}
 			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 			<div
 				class="tab"
@@ -152,6 +157,20 @@
 		flex-shrink: 0;
 		padding-right: 8px;
 		-webkit-app-region: no-drag;
+	}
+	.session-info {
+		display: flex;
+		align-items: center;
+		padding: 0 8px;
+		flex-shrink: 0;
+		border-right: 1px solid var(--color-border-muted);
+		margin-right: 4px;
+	}
+	.branch-label {
+		font-size: 11px;
+		color: var(--color-accent);
+		font-weight: 500;
+		white-space: nowrap;
 	}
 	.tabs {
 		display: flex;
