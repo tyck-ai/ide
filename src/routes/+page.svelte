@@ -18,6 +18,7 @@
 	import AppLauncher from '$lib/components/AppLauncher.svelte';
 	import PermissionReview from '$lib/components/PermissionReview.svelte';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
+	import ModeBar from '$lib/components/ModeBar.svelte';
 	import { TappContainer } from '$lib/components/tapp';
 	import { projectRoot, resetWorkspace } from '$lib/stores/editor';
 	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab } from '$lib/stores/layout';
@@ -181,6 +182,9 @@
 	<WelcomeView onOpen={openFolder} onOpenRecent={setWorkspace} />
 {:else}
 	<div class="app-layout" class:resizing={dragging !== null}>
+		<div class="mode-row">
+			<ModeBar />
+		</div>
 		<div class="awareness-row">
 			<AwarenessBar />
 		</div>
@@ -283,6 +287,9 @@
 	.app-layout.resizing {
 		cursor: col-resize;
 		user-select: none;
+	}
+	.mode-row {
+		flex-shrink: 0;
 	}
 	.awareness-row {
 		height: 36px;
