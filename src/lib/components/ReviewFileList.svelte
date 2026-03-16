@@ -1,6 +1,68 @@
 <script lang="ts">
+	import { invoke } from '@tauri-apps/api/core';
 	import { sessionReview, activeReview, type WorktreeFileDiff } from '$lib/stores/sessionReview';
-	import { activeSessionId } from '$lib/stores/agentTerminal';
+	import { activeSessionId, activeSession } from '$lib/stores/agentTerminal';
+	import { projectRoot } from '$lib/stores/editor';
+	import { toast } from '$lib/stores/toast';
+
+	let merging = $state(false);
+	let pushing = $state(false);
+	let hasRemote = $state(false);
+
+	// Check if remote exists
+	$effect(() => {
+		if ($projectRoot) {
+			invoke<boolean>('git_has_remote', { path: $projectRoot }).then(v => hasRemote = v).catch(() => hasRemote = false);
+		}
+	});
+
+	async function mergeToMain() {
+		const session = $activeSession;
+		if (!session || !$projectRoot || merging) return;
+		merging = true;
+		try {
+			const message = `Agent changes from ${session.branchName}\n\nSession: ${session.label}`;
+			await invoke('git_merge_branch', {
+				path: $projectRoot,
+				sourceBranch: session.branchName,
+				message,
+			});
+			toast.success(`Merged ${session.branchName} → main`);
+		} catch (e) {
+			toast.error(`Merge failed: ${e}`);
+		}
+		merging = false;
+	}
+
+	async function pushAndPr() {
+		const session = $activeSession;
+		if (!session || !$projectRoot || pushing) return;
+		pushing = true;
+		try {
+			await invoke('git_push_branch', {
+				path: session.worktreePath || $projectRoot,
+				branch: session.branchName,
+			});
+			toast.success(`Pushed ${session.branchName}`);
+
+			// Try to create PR via gh CLI
+			try {
+				const prUrl = await invoke<string>('gh_create_pr', {
+					path: session.worktreePath || $projectRoot,
+					title: session.instructions || session.label,
+					body: `Agent session: ${session.label}\nBranch: ${session.branchName}`,
+					base: 'main',
+					head: session.branchName,
+				});
+				toast.success(`PR created: ${prUrl}`);
+			} catch {
+				toast.info('Branch pushed. Create a PR manually on GitHub.');
+			}
+		} catch (e) {
+			toast.error(`Push failed: ${e}`);
+		}
+		pushing = false;
+	}
 
 	const modified = $derived(($activeReview?.diffs ?? []).filter(d => d.status === 'M'));
 	const added = $derived(($activeReview?.diffs ?? []).filter(d => d.status === 'A'));
@@ -122,6 +184,17 @@
 				{/each}
 			</div>
 		{/if}
+
+		<div class="review-actions">
+			<button class="review-btn merge" onclick={mergeToMain} disabled={merging || totalPending === 0}>
+				{merging ? 'Merging...' : 'Merge to Main'}
+			</button>
+			{#if hasRemote}
+				<button class="review-btn push" onclick={pushAndPr} disabled={pushing || totalPending === 0}>
+					{pushing ? 'Pushing...' : 'Push & PR'}
+				</button>
+			{/if}
+		</div>
 	{/if}
 </div>
 
@@ -199,4 +272,33 @@
 	.action.reject:hover { color: var(--color-error); border-color: var(--color-error); }
 	.done-badge { color: var(--color-success); font-size: 12px; }
 	.conflict-badge { color: var(--color-warning); font-size: 14px; }
+
+	.review-actions {
+		display: flex;
+		gap: 8px;
+		padding: 12px;
+		border-top: 1px solid var(--color-border-muted);
+		margin-top: 8px;
+	}
+	.review-btn {
+		flex: 1;
+		padding: 8px 12px;
+		border-radius: 6px;
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+		border: none;
+	}
+	.review-btn:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+	.review-btn.merge {
+		background: var(--color-success, #238636);
+		color: white;
+	}
+	.review-btn.push {
+		background: var(--color-accent);
+		color: white;
+	}
 </style>
