@@ -10,7 +10,7 @@
 	import ReviewPanel from './ReviewPanel.svelte';
 	import ReviewFileList from './ReviewFileList.svelte';
 
-	let contextTab = $state<'editor' | 'review'>('editor');
+	let contextTab = $state<'editor' | 'review'>('review');
 	const reviewCount = $derived($activeReview?.diffs.length ?? 0);
 
 	interface DirEntry {
@@ -157,11 +157,11 @@
 <div class="context-zone">
 	{#if $isAgentMode && $activeSessionId}
 		<div class="context-tabs">
-			<button class="context-tab" class:active={contextTab === 'editor'} onclick={() => contextTab = 'editor'}>
-				Editor
-			</button>
 			<button class="context-tab" class:active={contextTab === 'review'} onclick={() => contextTab = 'review'}>
 				Review{#if reviewCount > 0}<span class="tab-badge">{reviewCount}</span>{/if}
+			</button>
+			<button class="context-tab" class:active={contextTab === 'editor'} onclick={() => contextTab = 'editor'}>
+				Editor
 			</button>
 		</div>
 		{#if contextTab === 'review'}

@@ -149,8 +149,9 @@
 <div class="review-list">
 	{#if totalPending === 0}
 		<div class="empty">
-			<span class="empty-icon">✓</span>
-			<span class="empty-text">No changes to review</span>
+			<span class="empty-icon">💬</span>
+			<span class="empty-title">No changes yet</span>
+			<span class="empty-text">Prompt the agent to perform a task, or switch to the <strong>Editor</strong> tab to make code changes directly.</span>
 		</div>
 	{:else}
 		{#if modified.length > 0}
@@ -272,11 +273,14 @@
 		align-items: center;
 		justify-content: center;
 		height: 200px;
-		gap: 8px;
+		gap: 10px;
 		color: var(--color-text-subtle);
+		padding: 24px;
+		text-align: center;
 	}
-	.empty-icon { font-size: 24px; color: var(--color-success); }
-	.empty-text { font-size: 12px; }
+	.empty-icon { font-size: 28px; }
+	.empty-title { font-size: 13px; font-weight: 600; color: var(--color-text-secondary); }
+	.empty-text { font-size: 12px; line-height: 1.5; }
 	.group { margin-bottom: 4px; }
 	.group-header {
 		padding: 8px 12px;
