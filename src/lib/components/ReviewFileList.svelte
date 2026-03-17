@@ -149,7 +149,9 @@
 <div class="review-list">
 	{#if totalPending === 0}
 		<div class="empty">
-			<span class="empty-icon">💬</span>
+			<svg class="empty-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+			</svg>
 			<span class="empty-title">No changes yet</span>
 			<span class="empty-text">Prompt the agent to perform a task, or switch to the <strong>Editor</strong> tab to make code changes directly.</span>
 		</div>
@@ -278,7 +280,7 @@
 		padding: 24px;
 		text-align: center;
 	}
-	.empty-icon { font-size: 28px; }
+	.empty-icon { color: var(--color-text-subtle); opacity: 0.5; }
 	.empty-title { font-size: 13px; font-weight: 600; color: var(--color-text-secondary); }
 	.empty-text { font-size: 12px; line-height: 1.5; }
 	.group { margin-bottom: 4px; }
