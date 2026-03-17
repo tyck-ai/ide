@@ -2,7 +2,6 @@
 	import { openFiles, activeFilePath, closeFile, visibleFiles } from '$lib/stores/editor';
 	import { agentStatus, agentStatusConnected } from '$lib/stores/agentStatus';
 	import { activeSessionId, activeSession } from '$lib/stores/agentTerminal';
-	import { sessionReview, activeReview, hasActiveReview } from '$lib/stores/sessionReview';
 	import { isAgentMode, isDevMode } from '$lib/stores/settings';
 	import { pendingEditCount } from '$lib/stores/devModeEdits';
 
@@ -32,26 +31,11 @@
 </script>
 
 <div class="awareness-bar">
-	<!-- Left: View tabs -->
+	<!-- Left: Pending edits badge (dev mode only) -->
 	<div class="section-left">
-		<div class="view-toggle" role="group">
-			{#if $isAgentMode && $hasActiveReview}
-				{@const review = $activeReview}
-				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-				<button
-					class="view-toggle-btn"
-					class:active={review?.reviewMode}
-					class:has-changes={(review?.diffs.length ?? 0) > 0 && !review?.reviewMode}
-					onclick={async () => { if (!review?.reviewMode && $activeSessionId) await sessionReview.enterReviewMode($activeSessionId); }}
-				>Review{#if (review?.diffs.length ?? 0) > 0}<span class="toggle-count">{review?.diffs.length}</span>{/if}</button>
-			{/if}
-			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-			<button
-				class="view-toggle-btn"
-				class:active={!$isAgentMode || !$hasActiveReview || !$activeReview?.reviewMode}
-				onclick={() => { if ($activeReview?.reviewMode && $activeSessionId) sessionReview.exitReviewMode($activeSessionId); }}
-			>Editor{#if $isDevMode && $pendingEditCount > 0}<span class="toggle-count">{$pendingEditCount}</span>{/if}</button>
-		</div>
+		{#if $isDevMode && $pendingEditCount > 0}
+			<span class="pending-badge">{$pendingEditCount} pending edit{$pendingEditCount > 1 ? 's' : ''}</span>
+		{/if}
 	</div>
 
 	<!-- Center: File tabs + session info -->
@@ -157,6 +141,14 @@
 		flex-shrink: 0;
 		padding-right: 8px;
 		-webkit-app-region: no-drag;
+	}
+	.pending-badge {
+		font-size: 10px;
+		color: var(--color-accent);
+		font-weight: 600;
+		padding: 2px 8px;
+		background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+		border-radius: 10px;
 	}
 	.session-info {
 		display: flex;

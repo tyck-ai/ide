@@ -10,6 +10,7 @@
 		resumeAgentSession,
 	} from '$lib/stores/agentTerminal';
 	import { projectRoot } from '$lib/stores/editor';
+	import { isAgentMode } from '$lib/stores/settings';
 	import { invoke } from '@tauri-apps/api/core';
 
 	interface SessionInfo {
@@ -106,57 +107,60 @@
 </script>
 
 <div class="insight-zone">
-	<div class="header">
-		<div class="header-actions">
-			<button
-				class="icon-btn"
-				class:active={showSessionList}
-				onclick={toggleSessionList}
-				title="Past sessions"
-			>&#9776;</button>
-			<div class="new-session-wrapper">
+	{#if !$isAgentMode}
+		<!-- Dev mode: full InsightZone with session management -->
+		<div class="header">
+			<div class="header-actions">
 				<button
 					class="icon-btn"
-					class:active={showNewMenu}
-					onclick={() => showNewMenu = !showNewMenu}
-					title="New session"
-				>&#43;</button>
-				{#if showNewMenu}
-					<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-					<div class="new-menu-backdrop" onclick={() => showNewMenu = false}></div>
-					<div class="new-menu">
-						{#each $agentProviders as provider (provider.id)}
-							<button class="new-menu-item" onclick={() => newSessionWith(provider.id)}>
-								{provider.displayName}
-							</button>
-						{/each}
-					</div>
-				{/if}
+					class:active={showSessionList}
+					onclick={toggleSessionList}
+					title="Past sessions"
+				>&#9776;</button>
+				<div class="new-session-wrapper">
+					<button
+						class="icon-btn"
+						class:active={showNewMenu}
+						onclick={() => showNewMenu = !showNewMenu}
+						title="New session"
+					>&#43;</button>
+					{#if showNewMenu}
+						<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+						<div class="new-menu-backdrop" onclick={() => showNewMenu = false}></div>
+						<div class="new-menu">
+							{#each $agentProviders as provider (provider.id)}
+								<button class="new-menu-item" onclick={() => newSessionWith(provider.id)}>
+									{provider.displayName}
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
 			</div>
 		</div>
-	</div>
 
-	<!-- Session tabs -->
-	{#if $agentSessions.length > 1}
-		<div class="tab-bar">
-			{#each $agentSessions as session (session.id)}
-				<button
-					class="session-tab"
-					class:active={session.id === $activeSessionId}
-					onclick={() => switchAgentSession(session.id)}
-					title={session.label}
-				>
-					<span class="tab-label">{session.label}</span>
-					<!-- svelte-ignore a11y_click_events_have_key_events -->
-					<span
-						class="tab-close"
-						role="button"
-						tabindex="0"
-						onclick={(e) => { e.stopPropagation(); closeAgentSession(session.id); }}
-					>&times;</span>
-				</button>
-			{/each}
-		</div>
+		<!-- Session tabs -->
+		{#if $agentSessions.length > 1}
+			<div class="tab-bar">
+				{#each $agentSessions as session (session.id)}
+					<button
+						class="session-tab"
+						class:active={session.id === $activeSessionId}
+						onclick={() => switchAgentSession(session.id)}
+						title={session.label}
+					>
+						<span class="tab-label">{session.label}</span>
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<span
+							class="tab-close"
+							role="button"
+							tabindex="0"
+							onclick={(e) => { e.stopPropagation(); closeAgentSession(session.id); }}
+						>&times;</span>
+					</button>
+				{/each}
+			</div>
+		{/if}
 	{/if}
 
 	<div class="terminal-container">
@@ -172,8 +176,8 @@
 			</div>
 		{/each}
 
-		<!-- Session list overlay -->
-		{#if showSessionList}
+		<!-- Session list overlay (dev mode only — agent mode uses SessionHistory) -->
+		{#if !$isAgentMode && showSessionList}
 			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 			<div class="session-backdrop" onclick={() => showSessionList = false}>
 				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->

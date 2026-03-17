@@ -24,15 +24,21 @@
 			const sessionId = await spawnAgentSession(undefined, selectedProvider);
 
 			// If instructions provided, send them as the first message
+			// Retry a few times since the agent takes a moment to initialize
 			if (instructions.trim()) {
-				// Small delay to let the terminal initialize
-				setTimeout(async () => {
-					try {
-						await invoke('write_terminal', { id: sessionId, data: instructions.trim() + '\n' });
-					} catch {
-						// Agent might not be ready yet, non-critical
+				const msg = instructions.trim() + '\n';
+				const sendWithRetry = async (attempts: number, delay: number) => {
+					for (let i = 0; i < attempts; i++) {
+						await new Promise(r => setTimeout(r, delay));
+						try {
+							await invoke('write_terminal', { id: sessionId, data: msg });
+							return;
+						} catch {
+							// Agent not ready yet, retry
+						}
 					}
-				}, 1000);
+				};
+				sendWithRetry(5, 2000);
 			}
 
 			onClose();

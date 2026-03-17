@@ -95,19 +95,21 @@
 	.history-backdrop {
 		position: fixed;
 		inset: 0;
-		z-index: 250;
+		z-index: 300;
+		background: rgba(0,0,0,0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 	.history-panel {
-		position: absolute;
-		top: 32px;
-		right: 8px;
-		width: 360px;
-		max-height: 400px;
+		width: 440px;
+		max-width: 90vw;
+		max-height: 70vh;
 		overflow-y: auto;
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
-		border-radius: 10px;
-		box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+		border-radius: 12px;
+		box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 	}
 	.history-header {
 		display: flex;

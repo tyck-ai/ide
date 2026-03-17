@@ -20,6 +20,8 @@
 	let showMissionModal = $state(false);
 	let showNewMenu = $state(false);
 	let showHistory = $state(false);
+	let showModeDropdown = $state(false);
+	let showSwitchWarning = $state(false);
 	let contextMenuSession = $state<string | null>(null);
 	let contextMenuPos = $state({ x: 0, y: 0 });
 
@@ -71,16 +73,46 @@
 	}
 
 	function switchToDevMode() {
+		if ($agentSessions.length > 0) {
+			showSwitchWarning = true;
+			return;
+		}
+		updateSettings({ workspaceMode: 'dev' });
+	}
+
+	function confirmSwitchToDev() {
+		showSwitchWarning = false;
 		updateSettings({ workspaceMode: 'dev' });
 	}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div class="session-bar">
-	<button class="mode-indicator agent" onclick={() => {/* mode dropdown handled by ModeBar logic */}}>
+	<button class="mode-indicator agent" onclick={() => showModeDropdown = !showModeDropdown}>
 		<span class="mode-dot"></span>
 		Agent
+		<span class="mode-chevron">▾</span>
 	</button>
+
+	{#if showModeDropdown}
+		<div class="mode-dropdown-backdrop" onclick={() => showModeDropdown = false}></div>
+		<div class="mode-dropdown">
+			<div class="mode-dropdown-item selected">
+				<span class="mode-radio">◉</span>
+				<div class="mode-dropdown-info">
+					<span class="mode-dropdown-label">Agent Mode</span>
+					<span class="mode-dropdown-desc">Agents work on isolated branches.</span>
+				</div>
+			</div>
+			<button class="mode-dropdown-item" onclick={() => { showModeDropdown = false; switchToDevMode(); }}>
+				<span class="mode-radio">○</span>
+				<div class="mode-dropdown-info">
+					<span class="mode-dropdown-label">Dev Mode</span>
+					<span class="mode-dropdown-desc">Agent edits your files directly.</span>
+				</div>
+			</button>
+		</div>
+	{/if}
 
 	<button
 		class="peek-btn"
@@ -178,6 +210,23 @@
 	<SessionHistory onClose={() => showHistory = false} />
 {/if}
 
+{#if showSwitchWarning}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div class="switch-backdrop" onclick={() => showSwitchWarning = false}>
+		<div class="switch-modal" onclick={(e) => e.stopPropagation()}>
+			<div class="switch-title">Switch to Dev Mode?</div>
+			<div class="switch-text">
+				You have {$agentSessions.length} active agent session{$agentSessions.length > 1 ? 's' : ''}.
+				Switching will close them and clean up their worktrees.
+			</div>
+			<div class="switch-actions">
+				<button class="switch-btn cancel" onclick={() => showSwitchWarning = false}>Cancel</button>
+				<button class="switch-btn confirm" onclick={confirmSwitchToDev}>Switch Anyway</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.session-bar {
 		display: flex;
@@ -187,7 +236,7 @@
 		border-bottom: 1px solid var(--color-border-muted);
 		padding: 0 8px;
 		gap: 0;
-		overflow: hidden;
+		position: relative;
 	}
 	.mode-indicator {
 		display: flex;
@@ -198,10 +247,82 @@
 		color: var(--color-accent);
 		font-size: 11px;
 		font-weight: 600;
-		cursor: default;
+		cursor: pointer;
 		padding: 2px 8px;
 		flex-shrink: 0;
+		border-radius: 4px;
 	}
+	.mode-indicator:hover {
+		background: var(--color-overlay);
+	}
+	.mode-chevron {
+		font-size: 8px;
+		opacity: 0.5;
+	}
+	.mode-dropdown-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 99;
+	}
+	.mode-dropdown {
+		position: absolute;
+		top: 100%;
+		left: 8px;
+		z-index: 100;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 8px;
+		box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+		padding: 4px;
+		min-width: 260px;
+		margin-top: 4px;
+	}
+	.mode-dropdown-item {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+		width: 100%;
+		padding: 10px 12px;
+		background: none;
+		border: none;
+		border-radius: 6px;
+		cursor: pointer;
+		text-align: left;
+		color: var(--color-text);
+	}
+	.mode-dropdown-item:hover { background: var(--color-overlay); }
+	.mode-dropdown-item.selected {
+		background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+		cursor: default;
+	}
+	.mode-radio { color: var(--color-accent); font-size: 14px; margin-top: 1px; }
+	.mode-dropdown-info { display: flex; flex-direction: column; gap: 2px; }
+	.mode-dropdown-label { font-size: 13px; font-weight: 600; }
+	.mode-dropdown-desc { font-size: 11px; color: var(--color-text-subtle); }
+
+	.switch-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0,0,0,0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 300;
+	}
+	.switch-modal {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 10px;
+		padding: 24px;
+		max-width: 380px;
+		width: 90%;
+	}
+	.switch-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+	.switch-text { font-size: 13px; color: var(--color-text-secondary); line-height: 1.5; margin-bottom: 20px; }
+	.switch-actions { display: flex; justify-content: flex-end; gap: 8px; }
+	.switch-btn { padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; }
+	.switch-btn.cancel { background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text); }
+	.switch-btn.confirm { background: var(--color-warning, #fbbf24); border: none; color: #1a1a1a; }
 	.mode-dot {
 		width: 6px;
 		height: 6px;
