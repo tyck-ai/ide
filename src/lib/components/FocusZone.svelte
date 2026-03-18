@@ -11,8 +11,10 @@
 		selection as selectionStore,
 		cursorLine as cursorLineStore,
 	} from '$lib/stores/editor';
-	import { pendingEdits, updateEditStatus } from '$lib/stores/agent';
-	import { activeSessionId } from '$lib/stores/agentTerminal';
+	import InlineEditOverlay from './InlineEditOverlay.svelte';
+	import AgentEditBar from './AgentEditBar.svelte';
+	import { activeSessionId, activeSession, trackDevEdit } from '$lib/stores/agentTerminal';
+	import { isAgentMode } from '$lib/stores/settings';
 	import { sessionReview, activeReview, type MergeResult } from '$lib/stores/sessionReview';
 	import { setMonacoInstance, activeTheme, generateMonacoTheme, applyTheme } from '$lib/themes';
 	import type * as Monaco from 'monaco-editor';
@@ -23,19 +25,56 @@
 	let yoursContainer: HTMLDivElement;
 	let theirsContainer: HTMLDivElement;
 	let editor: Monaco.editor.IStandaloneCodeEditor | undefined;
+	let settingContent = false;
 	let diffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let mergeEditor: Monaco.editor.IStandaloneCodeEditor | undefined;
 	let yoursDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let theirsDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let monaco: typeof Monaco;
-	let decorationCollection: Monaco.editor.IEditorDecorationsCollection | undefined;
 	let diffInline = $state(false);
-	let inReview = $derived(!!$activeReview?.reviewMode && !!$activeReview?.selectedFile);
-	let isConflict = $derived(
-		!!$activeReview?.selectedFile &&
-		$activeReview?.fileDecisions.get($activeReview.selectedFile) === 'conflict'
-	);
 	let mergeView = $state<'result' | 'yours' | 'theirs'>('result');
+	/** Key of the file currently loaded in the diff editor (sessionId:relPath). Prevents re-creation on every store update. */
+	let currentDiffKey = $state<string | null>(null);
+	/** Line change the user is currently hovering over in the diff editor. */
+	let hoveredChange = $state<Monaco.editor.ILineChange | null>(null);
+	/** Pixel top of the hovered chunk within the diff-wrapper (toolbar + editor offset). */
+	let chunkMenuTop = $state<number | null>(null);
+	let hideChunkTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Snapshot-based undo/redo for chunk accept/reject operations. */
+	interface DiffSnapshot { orig: string; mod: string; }
+	let chunkUndoStack: DiffSnapshot[] = [];
+	let chunkRedoStack: DiffSnapshot[] = [];
+
+	/** Relative path of the active file within the session (mainCwd or worktreePath prefix). */
+	let activeFileRelPath = $derived.by(() => {
+		const file = $activeFile;
+		const review = $activeReview;
+		if (!file || !review) return null;
+		// Normalize paths to remove any trailing slash
+		const mainCwd = review.mainCwd.replace(/\/+$/, '');
+		const wtPath = review.worktreePath.replace(/\/+$/, '');
+		const mainPrefix = mainCwd + '/';
+		if (file.path.startsWith(mainPrefix)) return file.path.slice(mainPrefix.length);
+		const wtPrefix = wtPath + '/';
+		if (file.path.startsWith(wtPrefix)) return file.path.slice(wtPrefix.length);
+		return null;
+	});
+
+	/** True when the active file has pending agent changes in the current session. */
+	let inReview = $derived.by(() => {
+		if (!$isAgentMode) return false;
+		const rel = activeFileRelPath;
+		const review = $activeReview;
+		if (!rel || !review) return false;
+		return review.diffs.some(d => d.path === rel);
+	});
+
+	let isConflict = $derived.by(() => {
+		const rel = activeFileRelPath;
+		const review = $activeReview;
+		if (!rel || !review) return false;
+		return review.fileDecisions.get(rel) === 'conflict';
+	});
 
 	function getLanguage(filename: string): string {
 		const ext = filename.split('.').pop() ?? '';
@@ -46,59 +85,6 @@
 			sh: 'shell', bash: 'shell', zsh: 'shell',
 		};
 		return map[ext] ?? 'plaintext';
-	}
-
-	function updateDecorations() {
-		const file = $activeFile;
-		if (!editor || !monaco || !file) {
-			decorationCollection?.clear();
-			return;
-		}
-
-		const fileEdits = $pendingEdits.filter(
-			e => e.filePath === file.path && e.status === 'pending'
-		);
-
-		if (fileEdits.length === 0) {
-			decorationCollection?.clear();
-			return;
-		}
-
-		const content = editor.getValue();
-		const decorations: Monaco.editor.IModelDeltaDecoration[] = [];
-
-		for (const edit of fileEdits) {
-			if (edit.oldContent) {
-				const startIdx = content.indexOf(edit.oldContent);
-				if (startIdx !== -1) {
-					const model = editor.getModel();
-					if (!model) continue;
-					const startPos = model.getPositionAt(startIdx);
-					const endPos = model.getPositionAt(startIdx + edit.oldContent.length);
-					decorations.push({
-						range: new monaco.Range(startPos.lineNumber, 1, endPos.lineNumber, 1000),
-						options: {
-							isWholeLine: true,
-							className: 'diff-delete-line',
-							overviewRuler: {
-								color: '#f38ba860',
-								position: monaco.editor.OverviewRulerLane.Full,
-							},
-							minimap: {
-								color: '#f38ba860',
-								position: monaco.editor.MinimapPosition.Inline,
-							},
-						},
-					});
-				}
-			}
-		}
-
-		if (decorationCollection) {
-			decorationCollection.set(decorations);
-		} else {
-			decorationCollection = editor.createDecorationsCollection(decorations);
-		}
 	}
 
 	onMount(async () => {
@@ -150,9 +136,70 @@
 			padding: { top: 8 },
 			scrollBeyondLastLine: false,
 			automaticLayout: true,
-			wordWrap: 'off',
+			wordWrap: 'on',
 			tabSize: 2,
+			scrollbar: { horizontal: 'hidden' },
 		});
+
+		// Create diff editor eagerly so it's warm when the first diff appears (no creation latency)
+		diffEditor = monaco.editor.createDiffEditor(diffContainer, {
+			theme: 'tyck-theme',
+			fontSize: 12,
+			fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+			renderSideBySide: !diffInline,
+			automaticLayout: true,
+			scrollBeyondLastLine: false,
+			padding: { top: 8 },
+			minimap: { enabled: false },
+			wordWrap: 'on',
+			scrollbar: { horizontal: 'hidden' },
+		});
+
+		// Register undo/redo on the diff editor's modified pane.
+		// We maintain our own snapshot stack for chunk accept/reject operations because
+		// those edit the original model — Monaco's native undo only covers the modified model.
+		{
+			const modEd = diffEditor.getModifiedEditor();
+			modEd.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => chunkUndo());
+			modEd.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ, () => chunkRedo());
+			modEd.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, () => chunkRedo());
+		}
+
+		// Set up per-chunk hover listeners on the diff editor (once, reused across model swaps)
+		{
+			const TOOLBAR_H = 36; // approximate toolbar pixel height
+			const modEd = diffEditor.getModifiedEditor();
+
+			modEd.onMouseMove((e) => {
+				const changes = diffEditor?.getLineChanges();
+				if (!changes || !e.target.position) {
+					scheduleHideChunk();
+					return;
+				}
+				const line = e.target.position.lineNumber;
+				const change = changes.find(c => {
+					const end = c.modifiedEndLineNumber >= c.modifiedStartLineNumber
+						? c.modifiedEndLineNumber
+						: c.modifiedStartLineNumber;
+					return line >= c.modifiedStartLineNumber && line <= end;
+				}) ?? null;
+
+				if (change) {
+					cancelHideChunk();
+					hoveredChange = change;
+					chunkMenuTop = TOOLBAR_H + modEd.getTopForLineNumber(change.modifiedStartLineNumber) - modEd.getScrollTop();
+				} else {
+					scheduleHideChunk();
+				}
+			});
+
+			modEd.onMouseLeave(() => scheduleHideChunk());
+			modEd.onDidScrollChange(() => {
+				if (hoveredChange) {
+					chunkMenuTop = TOOLBAR_H + modEd.getTopForLineNumber(hoveredChange.modifiedStartLineNumber) - modEd.getScrollTop();
+				}
+			});
+		}
 
 		// Save on Ctrl+S / Cmd+S
 		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
@@ -162,45 +209,23 @@
 			try {
 				await invoke('write_file', { path: file.path, content: value });
 				markFileSaved(file.path);
+				const session = $activeSession;
+				if (session) {
+					// Exclude this file from the review tab — it's a developer edit, not an agent edit
+					sessionReview.markDevSaved(session.id, file.path);
+					// Track edits while agent is paused for context on resume
+					if (session.status === 'paused') {
+						trackDevEdit(session.id, file.path);
+					}
+				}
 			} catch (e) {
 				toast.error(`Failed to save ${file.name}: ${e}`);
 			}
 		});
 
-		// Accept diffs: Cmd+Shift+Enter
-		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
-			const file = $activeFile;
-			const fileEdits = $pendingEdits.filter(
-				e => file && e.filePath === file.path && e.status === 'pending'
-			);
-			for (const edit of fileEdits) {
-				updateEditStatus(edit.toolId, 'accepted');
-				if (edit.oldContent && edit.newContent) {
-					const model = editor!.getModel();
-					if (model) {
-						const content = model.getValue();
-						const newContent = content.replace(edit.oldContent, edit.newContent);
-						model.setValue(newContent);
-					}
-				}
-			}
-		});
-
-		// Reject diffs: Escape
-		editor.addCommand(monaco.KeyCode.Escape, () => {
-			const file = $activeFile;
-			const fileEdits = $pendingEdits.filter(
-				e => file && e.filePath === file.path && e.status === 'pending'
-			);
-			if (fileEdits.length > 0) {
-				for (const edit of fileEdits) {
-					updateEditStatus(edit.toolId, 'rejected');
-				}
-			}
-		});
-
-		// Track content changes
+		// Track content changes (skip programmatic setValue calls)
 		editor.onDidChangeModelContent(() => {
+			if (settingContent) return;
 			const file = $activeFile;
 			if (file) {
 				updateFileContent(file.path, editor!.getValue());
@@ -229,50 +254,54 @@
 			if (model) {
 				monaco.editor.setModelLanguage(model, lang);
 				if (model.getValue() !== file.content) {
+					settingContent = true;
 					model.setValue(file.content);
+					settingContent = false;
 				}
 			}
 		} else {
 			const model = editor.getModel();
 			if (model && model.getValue() !== '') {
+				settingContent = true;
 				model.setValue('');
+				settingContent = false;
 			}
 		}
 	});
 
-	// React to pending edits
-	$effect(() => {
-		$pendingEdits;
-		$activeFile;
-		updateDecorations();
-	});
-
-	// React to review mode + selected file → show diff or merge editor
+	// Auto-trigger diff/merge editor when active file has agent changes
 	$effect(() => {
 		const review = $activeReview;
+		const rel = activeFileRelPath;
 		if (!monaco) return;
 
-		if (review?.reviewMode && review?.selectedFile) {
-			const sid = review.sessionId;
-			const file = review.selectedFile;
-			const fileIsConflict = review.fileDecisions.get(file) === 'conflict';
-
+		if (review && rel && inReview) {
+			const key = `${review.sessionId}:${rel}`;
+			const fileIsConflict = review.fileDecisions.get(rel) === 'conflict';
 			if (fileIsConflict) {
-				tick().then(() => showMergeEditor(sid, file));
-			} else {
+				// Always re-show merge editor on conflict (state may have changed)
+				hideDiffEditor();
+				showMergeEditor(review.sessionId, rel);
+				currentDiffKey = key;
+			} else if (key !== currentDiffKey) {
+				// Only update models when file changes — not on every store update
+				currentDiffKey = key;
 				hideMergeEditor();
-				tick().then(() => showDiffEditor(sid, file));
+				showDiffEditor(review.sessionId, rel);
 			}
 		} else {
-			hideDiffEditor();
-			hideMergeEditor();
+			if (currentDiffKey !== null) {
+				currentDiffKey = null;
+				hideDiffEditor();
+				hideMergeEditor();
+			}
 		}
 	});
 
 	// ── Normal diff view (non-conflict) ──
 
 	async function showDiffEditor(sessionId: string, filePath: string) {
-		if (!monaco || !diffContainer) return;
+		if (!monaco || !diffEditor) return;
 
 		try {
 			const [originalContent, modifiedContent] = await Promise.all([
@@ -280,38 +309,40 @@
 				invoke<string>('get_file_from_worktree', { sessionId, filePath }).catch(() => ''),
 			]);
 
-			if (diffEditor) {
-				diffEditor.dispose();
-				diffEditor = undefined;
-			}
-
 			const lang = getLanguage(filePath.split('/').pop() ?? '');
 
-			diffEditor = monaco.editor.createDiffEditor(diffContainer, {
-				theme: 'tyck-theme',
-				fontSize: 12,
-				fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
-				readOnly: true,
-				renderSideBySide: !diffInline,
-				automaticLayout: true,
-				scrollBeyondLastLine: false,
-				padding: { top: 8 },
-				minimap: { enabled: false },
-			});
+			// Clear chunk undo/redo stacks — they belong to the previous file
+			chunkUndoStack.length = 0;
+			chunkRedoStack.length = 0;
 
+			// Reuse the existing editor instance — just swap models (no dispose/recreate = zero latency)
+			const oldModel = diffEditor.getModel();
+			diffEditor.updateOptions({ renderSideBySide: !diffInline });
 			diffEditor.setModel({
 				original: monaco.editor.createModel(originalContent, lang),
 				modified: monaco.editor.createModel(modifiedContent, lang),
 			});
+			// Dispose old models to avoid memory leaks
+			oldModel?.original?.dispose();
+			oldModel?.modified?.dispose();
 		} catch (e) {
 			console.warn('showDiffEditor failed:', e);
 		}
 	}
 
 	function hideDiffEditor() {
+		// Don't dispose — diffEditor is always-in-DOM and reused for instant rendering
+		// Just clear the model so memory isn't held
 		if (diffEditor) {
-			diffEditor.dispose();
-			diffEditor = undefined;
+			const oldModel = diffEditor.getModel();
+			if (oldModel?.original || oldModel?.modified) {
+				diffEditor.setModel({
+					original: monaco.editor.createModel('', 'plaintext'),
+					modified: monaco.editor.createModel('', 'plaintext'),
+				});
+				oldModel?.original?.dispose();
+				oldModel?.modified?.dispose();
+			}
 		}
 	}
 
@@ -409,7 +440,7 @@
 		disposeSideDiffs();
 		if (!monaco || !currentMerge || !yoursContainer) return;
 
-		const lang = getLanguage(($activeReview?.selectedFile ?? '').split('/').pop() ?? '');
+		const lang = getLanguage((activeFileRelPath ?? '').split('/').pop() ?? '');
 		yoursDiffEditor = monaco.editor.createDiffEditor(yoursContainer, {
 			theme: 'tyck-theme',
 			fontSize: 12,
@@ -432,7 +463,7 @@
 		disposeSideDiffs();
 		if (!monaco || !currentMerge || !theirsContainer) return;
 
-		const lang = getLanguage(($activeReview?.selectedFile ?? '').split('/').pop() ?? '');
+		const lang = getLanguage((activeFileRelPath ?? '').split('/').pop() ?? '');
 		theirsDiffEditor = monaco.editor.createDiffEditor(theirsContainer, {
 			theme: 'tyck-theme',
 			fontSize: 12,
@@ -482,7 +513,8 @@
 	async function onResolve() {
 		const review = $activeReview;
 		const sid = $activeSessionId;
-		if (!mergeEditor || !review?.selectedFile || !sid) return;
+		const rel = activeFileRelPath;
+		if (!mergeEditor || !rel || !sid) return;
 
 		const content = mergeEditor.getValue();
 
@@ -491,7 +523,7 @@
 			if (!confirm('The file still contains conflict markers. Resolve anyway?')) return;
 		}
 
-		await sessionReview.resolveConflict(sid, review.selectedFile, content);
+		await sessionReview.resolveConflict(sid, rel, content);
 		hideMergeEditor();
 	}
 
@@ -504,24 +536,212 @@
 		}
 	}
 
-	function onAcceptReviewFile() {
-		const review = $activeReview;
+	async function onAcceptReviewFile() {
+		const rel = activeFileRelPath;
 		const sid = $activeSessionId;
-		if (review?.selectedFile && sid) {
-			sessionReview.acceptFile(sid, review.selectedFile);
+		const review = $activeReview;
+		if (!rel || !sid || !review) return;
+
+		// If the dev made edits in the diff editor, write them back to the WORKTREE
+		// so those edits are part of the branch when Merge to Main / Push & PR is triggered.
+		// Nothing is written to the main workspace here — that happens only on merge/push.
+		const modifiedContent = diffEditor?.getModifiedEditor().getValue();
+		if (modifiedContent !== undefined) {
+			try {
+				await invoke('write_file', { path: review.worktreePath + '/' + rel, content: modifiedContent });
+			} catch (e) {
+				toast.error(`Failed to save edits: ${e}`);
+				return;
+			}
 		}
+
+		// Remove from the review diff — file stays in the worktree branch
+		sessionReview.removeFileFromReview(sid, rel);
 	}
 
 	function onRejectReviewFile() {
-		const review = $activeReview;
+		const rel = activeFileRelPath;
 		const sid = $activeSessionId;
-		if (review?.selectedFile && sid) {
-			sessionReview.rejectFile(sid, review.selectedFile);
+		if (!rel || !sid) return;
+		sessionReview.rejectFile(sid, rel);
+	}
+
+	function pushChunkUndo() {
+		const origModel = diffEditor?.getOriginalEditor().getModel();
+		const modModel = diffEditor?.getModifiedEditor().getModel();
+		if (!origModel || !modModel) return;
+		chunkUndoStack.push({ orig: origModel.getValue(), mod: modModel.getValue() });
+		chunkRedoStack.length = 0;
+	}
+
+	function chunkUndo() {
+		const modEd = diffEditor?.getModifiedEditor();
+		const origModel = diffEditor?.getOriginalEditor().getModel();
+		const modModel = modEd?.getModel();
+		if (!origModel || !modModel || !modEd) return;
+		if (chunkUndoStack.length === 0) {
+			modEd.trigger('keyboard', 'undo', null);
+			return;
+		}
+		const cursor = modEd.getPosition();
+		chunkRedoStack.push({ orig: origModel.getValue(), mod: modModel.getValue() });
+		const snap = chunkUndoStack.pop()!;
+		origModel.setValue(snap.orig);
+		modModel.setValue(snap.mod);
+		if (cursor) modEd.setPosition(cursor);
+		modEd.focus();
+	}
+
+	function chunkRedo() {
+		const modEd = diffEditor?.getModifiedEditor();
+		const origModel = diffEditor?.getOriginalEditor().getModel();
+		const modModel = modEd?.getModel();
+		if (!origModel || !modModel || !modEd) return;
+		if (chunkRedoStack.length === 0) {
+			modEd.trigger('keyboard', 'redo', null);
+			return;
+		}
+		const cursor = modEd.getPosition();
+		chunkUndoStack.push({ orig: origModel.getValue(), mod: modModel.getValue() });
+		const snap = chunkRedoStack.pop()!;
+		origModel.setValue(snap.orig);
+		modModel.setValue(snap.mod);
+		if (cursor) modEd.setPosition(cursor);
+		modEd.focus();
+	}
+
+	function scheduleHideChunk() {
+		if (hideChunkTimer) return;
+		hideChunkTimer = setTimeout(() => {
+			hoveredChange = null;
+			chunkMenuTop = null;
+			hideChunkTimer = null;
+		}, 200);
+	}
+
+	function cancelHideChunk() {
+		if (hideChunkTimer) {
+			clearTimeout(hideChunkTimer);
+			hideChunkTimer = null;
 		}
 	}
 
+	function acceptChunk(change: Monaco.editor.ILineChange) {
+		pushChunkUndo();
+		// Apply this chunk to the original model so the diff for it disappears.
+		// The modified content is unchanged — "Accept All" will still write it to disk.
+		const modEd = diffEditor?.getModifiedEditor();
+		const origEd = diffEditor?.getOriginalEditor();
+		const modModel = modEd?.getModel();
+		const origModel = origEd?.getModel();
+		if (!modModel || !origModel || !monaco) return;
+
+		const isPureInsertion = change.originalEndLineNumber < change.originalStartLineNumber;
+		const isPureDeletion = change.modifiedEndLineNumber < change.modifiedStartLineNumber;
+
+		if (isPureDeletion) {
+			// Agent deleted lines — remove them from original too
+			origModel.pushEditOperations([], [{
+				range: {
+					startLineNumber: change.originalStartLineNumber,
+					startColumn: 1,
+					endLineNumber: change.originalEndLineNumber,
+					endColumn: origModel.getLineMaxColumn(change.originalEndLineNumber),
+				},
+				text: '',
+			}], () => null);
+		} else if (isPureInsertion) {
+			// Agent added lines — insert them into original after originalStartLineNumber
+			const modifiedText = modModel.getValueInRange({
+				startLineNumber: change.modifiedStartLineNumber,
+				startColumn: 1,
+				endLineNumber: change.modifiedEndLineNumber,
+				endColumn: modModel.getLineMaxColumn(change.modifiedEndLineNumber),
+			});
+			origModel.pushEditOperations([], [{
+				range: {
+					startLineNumber: change.originalStartLineNumber,
+					startColumn: origModel.getLineMaxColumn(change.originalStartLineNumber),
+					endLineNumber: change.originalStartLineNumber,
+					endColumn: origModel.getLineMaxColumn(change.originalStartLineNumber),
+				},
+				text: '\n' + modifiedText,
+			}], () => null);
+		} else {
+			// Agent modified lines — update original to match modified for this range
+			const modifiedText = modModel.getValueInRange({
+				startLineNumber: change.modifiedStartLineNumber,
+				startColumn: 1,
+				endLineNumber: change.modifiedEndLineNumber,
+				endColumn: modModel.getLineMaxColumn(change.modifiedEndLineNumber),
+			});
+			origModel.pushEditOperations([], [{
+				range: {
+					startLineNumber: change.originalStartLineNumber,
+					startColumn: 1,
+					endLineNumber: change.originalEndLineNumber,
+					endColumn: origModel.getLineMaxColumn(change.originalEndLineNumber),
+				},
+				text: modifiedText,
+			}], () => null);
+		}
+
+		hoveredChange = null;
+		chunkMenuTop = null;
+		diffEditor?.getModifiedEditor().focus();
+	}
+
+	function rejectChunk(change: Monaco.editor.ILineChange) {
+		pushChunkUndo();
+		const modEd = diffEditor?.getModifiedEditor();
+		const origEd = diffEditor?.getOriginalEditor();
+		const modModel = modEd?.getModel();
+		const origModel = origEd?.getModel();
+		if (!modModel || !origModel || !monaco) return;
+
+		const isPureDeletion = change.modifiedEndLineNumber < change.modifiedStartLineNumber;
+		const isPureInsertion = change.originalEndLineNumber < change.originalStartLineNumber;
+
+		let originalText = '';
+		if (!isPureInsertion) {
+			originalText = origModel.getValueInRange({
+				startLineNumber: change.originalStartLineNumber,
+				startColumn: 1,
+				endLineNumber: change.originalEndLineNumber,
+				endColumn: origModel.getLineMaxColumn(change.originalEndLineNumber),
+			});
+		}
+
+		if (isPureDeletion) {
+			// Lines were deleted by agent — restore them after modifiedStartLineNumber
+			modModel.pushEditOperations([], [{
+				range: {
+					startLineNumber: change.modifiedStartLineNumber,
+					startColumn: modModel.getLineMaxColumn(change.modifiedStartLineNumber),
+					endLineNumber: change.modifiedStartLineNumber,
+					endColumn: modModel.getLineMaxColumn(change.modifiedStartLineNumber),
+				},
+				text: '\n' + originalText,
+			}], () => null);
+		} else {
+			modModel.pushEditOperations([], [{
+				range: {
+					startLineNumber: change.modifiedStartLineNumber,
+					startColumn: 1,
+					endLineNumber: change.modifiedEndLineNumber,
+					endColumn: modModel.getLineMaxColumn(change.modifiedEndLineNumber),
+				},
+				text: originalText,
+			}], () => null);
+		}
+
+		hoveredChange = null;
+		chunkMenuTop = null;
+		diffEditor?.getModifiedEditor().focus();
+	}
+
 	onDestroy(() => {
-		decorationCollection?.clear();
+		if (hideChunkTimer) clearTimeout(hideChunkTimer);
 		editor?.dispose();
 		diffEditor?.dispose();
 		mergeEditor?.dispose();
@@ -534,7 +754,7 @@
 		<!-- Merge conflict editor -->
 		<div class="review-diff-wrapper">
 			<div class="diff-toolbar merge-toolbar">
-				<span class="diff-file-name conflict-label">CONFLICT: {$activeReview?.selectedFile}</span>
+				<span class="diff-file-name conflict-label">CONFLICT: {activeFileRelPath}</span>
 				<div class="diff-toolbar-actions">
 					<div class="merge-tabs">
 						<button class="merge-tab" class:active={mergeView === 'result'} onclick={showResultView}>Result</button>
@@ -552,22 +772,34 @@
 				<div class="merge-editor-container" class:hidden={mergeView !== 'theirs'} bind:this={theirsContainer}></div>
 			</div>
 		</div>
-	{:else if inReview}
-		<!-- Review mode: diff editor -->
-		<div class="review-diff-wrapper">
-			<div class="diff-toolbar">
-				<span class="diff-file-name">{$activeReview?.selectedFile}</span>
-				<div class="diff-toolbar-actions">
-					<button class="diff-tool-btn" onclick={toggleDiffLayout}>
-						{diffInline ? 'Side-by-Side' : 'Inline'}
-					</button>
-					<button class="diff-tool-btn accept" onclick={onAcceptReviewFile}>Accept</button>
-					<button class="diff-tool-btn reject" onclick={onRejectReviewFile}>Reject</button>
-				</div>
-			</div>
-			<div class="diff-editor-container" bind:this={diffContainer}></div>
-		</div>
 	{/if}
+
+	<!-- Diff editor always in DOM (hidden when not in review) so Monaco stays alive and loads instantly -->
+	<div class="review-diff-wrapper" class:hidden={!inReview || isConflict}>
+		<div class="diff-toolbar">
+			<span class="diff-file-name">{activeFileRelPath}</span>
+			<div class="diff-toolbar-actions">
+				<button class="diff-tool-btn" onclick={toggleDiffLayout}>
+					{diffInline ? 'Side-by-Side' : 'Inline'}
+				</button>
+				<button class="diff-tool-btn accept" onclick={onAcceptReviewFile}>Accept All</button>
+				<button class="diff-tool-btn reject" onclick={onRejectReviewFile}>Reject All</button>
+			</div>
+		</div>
+		<div class="diff-editor-container" bind:this={diffContainer}></div>
+		{#if hoveredChange !== null && chunkMenuTop !== null}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div
+				class="chunk-action-bar"
+				style="top: {chunkMenuTop}px"
+				onmouseenter={cancelHideChunk}
+				onmouseleave={scheduleHideChunk}
+			>
+				<button class="chunk-btn accept" onclick={() => acceptChunk(hoveredChange!)}>✓ Keep</button>
+				<button class="chunk-btn reject" onclick={() => rejectChunk(hoveredChange!)}>✕ Revert</button>
+			</div>
+		{/if}
+	</div>
 
 	<!-- Editor always in DOM (hidden during review) so Monaco stays alive -->
 	<div class="editor-layer" class:hidden={inReview}>
@@ -577,13 +809,9 @@
 				<p>Open a file from the explorer to start editing</p>
 			</div>
 		{/if}
+		<AgentEditBar />
+		<InlineEditOverlay />
 		<div class="editor-container" class:hidden={!$activeFile} bind:this={editorContainer}></div>
-		{#if $activeFile && $pendingEdits.some(e => e.filePath === $activeFile?.path && e.status === 'pending')}
-			<div class="diff-bar">
-				<span class="diff-bar-text">Pending changes</span>
-				<span class="diff-bar-hint">Cmd+Shift+Enter to accept | Esc to reject</span>
-			</div>
-		{/if}
 	</div>
 </div>
 
@@ -722,6 +950,46 @@
 		flex-direction: column;
 		height: 100%;
 		width: 100%;
+		position: relative;
+	}
+	.review-diff-wrapper.hidden {
+		display: none;
+	}
+	.chunk-action-bar {
+		position: absolute;
+		right: 16px;
+		z-index: 20;
+		display: flex;
+		gap: 3px;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 5px;
+		padding: 2px 3px;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+		pointer-events: auto;
+	}
+	.chunk-btn {
+		padding: 2px 8px;
+		border: none;
+		border-radius: 3px;
+		font-size: 10px;
+		font-weight: 700;
+		cursor: pointer;
+		transition: background 0.1s;
+	}
+	.chunk-btn.accept {
+		background: color-mix(in srgb, var(--color-success) 15%, transparent);
+		color: var(--color-success);
+	}
+	.chunk-btn.accept:hover {
+		background: color-mix(in srgb, var(--color-success) 25%, transparent);
+	}
+	.chunk-btn.reject {
+		background: color-mix(in srgb, var(--color-error) 15%, transparent);
+		color: var(--color-error);
+	}
+	.chunk-btn.reject:hover {
+		background: color-mix(in srgb, var(--color-error) 25%, transparent);
 	}
 	.diff-editor-container {
 		flex: 1;

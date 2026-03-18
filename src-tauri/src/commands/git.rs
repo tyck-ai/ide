@@ -36,6 +36,139 @@ fn is_relevant_git_path(path: &std::path::Path) -> bool {
 }
 
 #[tauri::command]
+pub fn git_is_repo(path: String) -> bool {
+    PathBuf::from(&path).join(".git").is_dir()
+}
+
+#[tauri::command]
+pub fn git_init_repo(path: String) -> Result<(), String> {
+    let run = |args: &[&str]| -> Result<(), String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&path)
+            .output()
+            .map_err(|e| format!("Failed to run git: {}", e))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git {} failed: {}", args[0], stderr));
+        }
+        Ok(())
+    };
+
+    run(&["init"])?;
+    run(&["add", "-A"])?;
+    run(&["commit", "-m", "Initial commit", "--allow-empty"])?;
+    Ok(())
+}
+
+/// Revert specific files on a branch to their base state (undo agent changes).
+/// Used to strip rejected files before merge/push.
+#[tauri::command]
+pub fn git_revert_files(path: String, files: Vec<String>) -> Result<(), String> {
+    for file in &files {
+        let output = Command::new("git")
+            .args(["checkout", "HEAD~1", "--", file])
+            .current_dir(&path)
+            .output()
+            .map_err(|e| format!("Failed to revert {}: {}", file, e))?;
+
+        if !output.status.success() {
+            // If HEAD~1 doesn't exist (single commit), try removing the file
+            let _ = Command::new("git")
+                .args(["rm", "-f", "--", file])
+                .current_dir(&path)
+                .output();
+        }
+    }
+
+    // Commit the reverts
+    if !files.is_empty() {
+        let _ = Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(&path)
+            .output();
+        let _ = Command::new("git")
+            .args(["commit", "-m", "Revert rejected files", "--allow-empty"])
+            .current_dir(&path)
+            .output();
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_has_remote(path: String) -> bool {
+    Command::new("git")
+        .args(["remote"])
+        .current_dir(&path)
+        .output()
+        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn git_push_branch(path: String, branch: String) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["push", "--set-upstream", "origin", &branch])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| format!("Failed to push: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Push failed: {}", stderr));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_merge_branch(path: String, source_branch: String, message: String) -> Result<String, String> {
+    // Squash merge
+    let output = Command::new("git")
+        .args(["merge", "--squash", &source_branch])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| format!("Merge failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Merge failed: {}", stderr));
+    }
+
+    // Commit
+    let output = Command::new("git")
+        .args(["commit", "-m", &message])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| format!("Commit failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Commit failed: {}", stderr));
+    }
+
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(sha)
+}
+
+#[tauri::command]
+pub fn gh_create_pr(path: String, title: String, body: String, base: String, head: String) -> Result<String, String> {
+    let output = Command::new("gh")
+        .args(["pr", "create", "--title", &title, "--body", &body, "--base", &base, "--head", &head])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| format!("gh pr create failed: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("PR creation failed: {}", stderr));
+    }
+
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(url)
+}
+
+#[tauri::command]
 pub fn watch_git_directory(app: AppHandle, path: String) -> Result<(), String> {
     let git_path = PathBuf::from(&path).join(".git");
     if !git_path.is_dir() {

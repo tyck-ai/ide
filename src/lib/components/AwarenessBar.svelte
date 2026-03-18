@@ -1,12 +1,46 @@
 <script lang="ts">
-	import { openFiles, activeFilePath, closeFile } from '$lib/stores/editor';
+	import { invoke } from '@tauri-apps/api/core';
+	import { openFiles, activeFilePath, closeFile, markFileSaved, visibleFiles } from '$lib/stores/editor';
 	import { agentStatus, agentStatusConnected } from '$lib/stores/agentStatus';
 	import { activeSessionId } from '$lib/stores/agentTerminal';
-	import { sessionReview, activeReview, hasActiveReview } from '$lib/stores/sessionReview';
-	import { settings } from '$lib/stores/settings';
+	import { isDevMode } from '$lib/stores/settings';
+	import { pendingEditCount } from '$lib/stores/devModeEdits';
+	import { toast } from '$lib/stores/toast';
+
+	let pendingClosePath = $state<string | null>(null);
+
+	const pendingCloseFile = $derived(
+		pendingClosePath ? $openFiles.find(f => f.path === pendingClosePath) ?? null : null
+	);
 
 	function switchTo(path: string) {
 		activeFilePath.set(path);
+	}
+
+	function requestClose(path: string, modified: boolean) {
+		if (modified) {
+			pendingClosePath = path;
+		} else {
+			closeFile(path);
+		}
+	}
+
+	function discard() {
+		if (pendingClosePath) closeFile(pendingClosePath);
+		pendingClosePath = null;
+	}
+
+	async function saveAndClose() {
+		const file = pendingCloseFile;
+		if (!file) return;
+		try {
+			await invoke('write_file', { path: file.path, content: file.content });
+			markFileSaved(file.path);
+			closeFile(file.path);
+		} catch (e) {
+			toast.error(`Failed to save ${file.name}: ${e}`);
+		}
+		pendingClosePath = null;
 	}
 
 	function formatCost(usd: number): string {
@@ -31,31 +65,16 @@
 </script>
 
 <div class="awareness-bar">
-	<!-- Left: View tabs -->
+	<!-- Left: Pending edits badge (dev mode only) -->
 	<div class="section-left">
-		<div class="view-toggle" role="group">
-			{#if $settings.reviewEnabled && $hasActiveReview}
-				{@const review = $activeReview}
-				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-				<button
-					class="view-toggle-btn"
-					class:active={review?.reviewMode}
-					class:has-changes={(review?.diffs.length ?? 0) > 0 && !review?.reviewMode}
-					onclick={async () => { if (!review?.reviewMode && $activeSessionId) await sessionReview.enterReviewMode($activeSessionId); }}
-				>Review{#if (review?.diffs.length ?? 0) > 0}<span class="toggle-count">{review?.diffs.length}</span>{/if}</button>
-			{/if}
-			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-			<button
-				class="view-toggle-btn"
-				class:active={!$settings.reviewEnabled || !$hasActiveReview || !$activeReview?.reviewMode}
-				onclick={() => { if ($activeReview?.reviewMode && $activeSessionId) sessionReview.exitReviewMode($activeSessionId); }}
-			>Editor</button>
-		</div>
+		{#if $isDevMode && $pendingEditCount > 0}
+			<span class="pending-badge">{$pendingEditCount} pending edit{$pendingEditCount > 1 ? 's' : ''}</span>
+		{/if}
 	</div>
 
 	<!-- Center: File tabs -->
 	<div class="tabs">
-		{#each $openFiles as file (file.path)}
+		{#each ($isDevMode ? $openFiles : $visibleFiles) as file (file.path)}
 			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 			<div
 				class="tab"
@@ -70,7 +89,7 @@
 				{/if}
 				<button
 					class="tab-close"
-					onclick={(e) => { e.stopPropagation(); closeFile(file.path); }}
+					onclick={(e) => { e.stopPropagation(); requestClose(file.path, file.modified); }}
 				>&times;</button>
 			</div>
 		{/each}
@@ -131,6 +150,22 @@
 	</div>
 </div>
 
+{#if pendingClosePath && pendingCloseFile}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div class="close-backdrop" onclick={() => pendingClosePath = null}>
+		<div class="close-modal" onclick={(e) => e.stopPropagation()}>
+			<div class="close-title">Unsaved changes</div>
+			<div class="close-text">
+				<strong>{pendingCloseFile.name}</strong> has unsaved changes. What would you like to do?
+			</div>
+			<div class="close-actions">
+				<button class="close-btn discard" onclick={discard}>Discard</button>
+				<button class="close-btn save" onclick={saveAndClose}>Save</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 <style>
 	.awareness-bar {
 		display: flex;
@@ -152,7 +187,15 @@
 		padding-right: 8px;
 		-webkit-app-region: no-drag;
 	}
-	.tabs {
+	.pending-badge {
+		font-size: 10px;
+		color: var(--color-accent);
+		font-weight: 600;
+		padding: 2px 8px;
+		background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+		border-radius: 10px;
+	}
+.tabs {
 		display: flex;
 		gap: 1px;
 		overflow-x: auto;
@@ -351,5 +394,64 @@
 	}
 	.view-toggle-btn.active .toggle-count {
 		background: var(--color-accent);
+	}
+
+	.close-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0,0,0,0.5);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 300;
+	}
+	.close-modal {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 10px;
+		padding: 24px;
+		max-width: 360px;
+		width: 90%;
+	}
+	.close-title {
+		font-size: 15px;
+		font-weight: 600;
+		margin-bottom: 10px;
+	}
+	.close-text {
+		font-size: 13px;
+		color: var(--color-text-secondary);
+		line-height: 1.5;
+		margin-bottom: 20px;
+	}
+	.close-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+	}
+	.close-btn {
+		padding: 7px 18px;
+		border-radius: 6px;
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+		border: none;
+	}
+	.close-btn.discard {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		color: var(--color-text);
+	}
+	.close-btn.discard:hover {
+		background: color-mix(in srgb, var(--color-error) 10%, transparent);
+		border-color: var(--color-error);
+		color: var(--color-error);
+	}
+	.close-btn.save {
+		background: var(--color-accent);
+		color: var(--color-base);
+	}
+	.close-btn.save:hover {
+		filter: brightness(1.1);
 	}
 </style>

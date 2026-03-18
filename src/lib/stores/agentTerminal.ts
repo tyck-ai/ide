@@ -1,25 +1,38 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { activeProvider, agentProviders } from './agentProvider';
-import { projectRoot } from './editor';
+import { projectRoot, activeWorktreePath } from './editor';
+import { switchSessionContext, clearSessionState } from './sessionContext';
 import { agentStatusConnected, agentStatus, switchActiveStatus, recordStatus } from './agentStatus';
 import { checkpoint } from './checkpoint';
 import { sessionReview } from './sessionReview';
-import { settings } from './settings';
+import { isAgentMode } from './settings';
 import { activeSessionId } from './activeSession';
 import { listen } from '@tauri-apps/api/event';
 
 export { activeSessionId } from './activeSession';
 
+export type SessionStatus = 'working' | 'idle' | 'done' | 'error' | 'paused';
+
 export interface AgentSession {
 	id: string;
 	label: string;
+	branchName: string;
+	worktreePath: string;
 	providerId: string;
 	statusFile: string;
+	status: SessionStatus;
+	instructions?: string;
 	resumeSessionId?: string;
+	createdAt: number;
+	mode: 'dev' | 'agent';
 }
 
 export const agentSessions = writable<AgentSession[]>([]);
+
+// Mode-filtered views — use these in components instead of raw agentSessions
+export const devSessions = derived(agentSessions, $s => $s.filter(s => s.mode === 'dev'));
+export const agentModeSessions = derived(agentSessions, $s => $s.filter(s => s.mode === 'agent'));
 
 export const activeSession = derived(
 	[agentSessions, activeSessionId],
@@ -47,7 +60,7 @@ async function stopProviderSessionDiscovery(worktreeSessionId: string): Promise<
 	}
 }
 
-export async function spawnAgentSession(resumeSessionId?: string, providerId?: string, resumeSessionPath?: string): Promise<string> {
+export async function spawnAgentSession(resumeSessionId?: string, providerId?: string, resumeSessionPath?: string, name?: string): Promise<string> {
 	const provider = providerId
 		? get(agentProviders).find(p => p.id === providerId) ?? get(activeProvider)
 		: get(activeProvider);
@@ -107,10 +120,10 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 
 	// Build args — get provider-specific resume args from Rust
 	const args = [...provider.args];
-	const reviewEnabled = get(settings).reviewEnabled;
+	const agentMode = get(isAgentMode);
 	
 	// Pass --resume when resuming an existing session
-	// Always use the Claude session ID (resumeSessionId), not the worktree ID
+	// Always use the provider's session ID (resumeSessionId), not the worktree ID
 	if (resumeSessionId) {
 		const resumeArgs = await invoke<string[]>('get_resume_args', {
 			provider: provider.id,
@@ -129,7 +142,7 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	// Create worktree for agent isolation (only when review mode is enabled and cwd is a git repo)
 	let agentCwd = cwd;
 
-	if (cwd && reviewEnabled) {
+	if (cwd && agentMode) {
 		try {
 			// If we already found an existing worktree, use it directly
 			if (existingWorktreePath) {
@@ -189,12 +202,12 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 
 	// For new sessions, start background discovery of the provider's session ID
 	// This runs in the backend and survives frontend crashes
-	if (cwd && reviewEnabled && !existingWorktreePath) {
+	if (cwd && agentMode && !existingWorktreePath) {
 		startProviderSessionDiscovery(id);
 	}
 
 	// On terminal exit: refresh worktree diffs
-	if (cwd && reviewEnabled) {
+	if (cwd && agentMode) {
 		listen(`pty-exit-${id}`, async () => {
 			try {
 				await sessionReview.refreshDiffs(id);
@@ -218,30 +231,98 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	}
 
 	sessionCounter++;
-	const label = resumeSessionId
-		? `Resumed ${resumeSessionId.slice(0, 8)}`
-		: `Session ${sessionCounter}`;
+	const label = name?.trim()
+		|| (resumeSessionId ? `Resumed ${resumeSessionId.slice(0, 8)}` : `Session ${sessionCounter}`);
 
 	const session: AgentSession = {
 		id,
 		label,
+		branchName: `tyck/${provider.id}/${id.slice(0, 8)}`,
+		worktreePath: agentCwd || cwd || '',
 		providerId: provider.id,
 		statusFile,
+		status: 'working',
 		resumeSessionId,
+		createdAt: Date.now(),
+		mode: agentMode ? 'agent' : 'dev',
 	};
 
 	agentSessions.update(s => [...s, session]);
-	activeSessionId.set(id);
+
+	// When in agent mode, save previous session state and init fresh state for this one.
+	// In dev mode, spawning doesn't affect file context — InsightZone manages dev sessions independently.
+	if (agentMode) {
+		switchSessionContext(id); // saves current, restores (or inits) new
+		activeSessionId.set(id);
+	} else {
+		activeSessionId.set(id);
+	}
+	activeWorktreePath.set(session.worktreePath || null);
 
 	return id;
 }
 
 export function switchAgentSession(id: string) {
+	// Save current session's UI state and restore the new one
+	switchSessionContext(id);
+
 	activeSessionId.set(id);
 	switchActiveStatus(id);
+
+	// Update the working directory for the file tree
+	const sessions = get(agentSessions);
+	const session = sessions.find(s => s.id === id);
+	if (session?.worktreePath) {
+		activeWorktreePath.set(session.worktreePath);
+	}
+}
+
+export function updateSessionStatus(id: string, status: SessionStatus) {
+	agentSessions.update(sessions =>
+		sessions.map(s => s.id === id ? { ...s, status } : s)
+	);
+}
+
+// Track files the developer edits while agent is paused
+const devEditsWhilePaused = new Map<string, Set<string>>();
+
+/** Pause the active agent by sending Ctrl+C */
+export async function pauseAgent(sessionId: string) {
+	try {
+		await invoke('write_terminal', { id: sessionId, data: '\x03' });
+	} catch { /* terminal may be closed */ }
+	devEditsWhilePaused.set(sessionId, new Set());
+	updateSessionStatus(sessionId, 'paused');
+}
+
+/** Track a file the developer edited while the agent was paused */
+export function trackDevEdit(sessionId: string, filePath: string) {
+	const edits = devEditsWhilePaused.get(sessionId);
+	if (edits) edits.add(filePath);
+}
+
+/** Resume a paused agent with context about developer's changes */
+export async function resumeAgent(sessionId: string) {
+	const edits = devEditsWhilePaused.get(sessionId);
+	const changedFiles = edits ? Array.from(edits) : [];
+	devEditsWhilePaused.delete(sessionId);
+
+	let prompt = 'Continue where you left off.';
+	if (changedFiles.length > 0) {
+		const fileList = changedFiles.map(f => f.split('/').pop()).join(', ');
+		prompt += `\n\nNote: I manually edited these files while you were paused: ${fileList}. Please review them before continuing.`;
+	}
+
+	try {
+		await invoke('write_terminal', { id: sessionId, data: prompt + '\r' });
+	} catch { /* terminal may be closed */ }
+	updateSessionStatus(sessionId, 'working');
 }
 
 export async function closeAgentSession(id: string): Promise<void> {
+	// Clean up session UI state
+	clearSessionState(id);
+
 	// Clean up event listeners for this session
 	const unlistens = sessionUnlistens.get(id);
 	if (unlistens) {

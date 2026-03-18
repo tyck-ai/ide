@@ -28,7 +28,7 @@ export const agentProviders = derived(detectedProviders, ($detected) =>
 		}))
 );
 
-export const activeProviderId = writable<string>('claude-code');
+export const activeProviderId = writable<string>('');
 
 /** Sync activeProviderId from settings on load. */
 export function applyDefaultProvider() {

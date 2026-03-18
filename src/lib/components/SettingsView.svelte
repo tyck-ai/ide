@@ -18,9 +18,9 @@
 
 	const sections = [
 		{ id: 'appearance', label: 'Appearance' },
+		{ id: 'workspace', label: 'Workspace' },
 		{ id: 'agents', label: 'Agents' },
 		{ id: 'apps', label: 'Apps' },
-		{ id: 'review', label: 'Review' },
 	] as const;
 
 	type SectionId = (typeof sections)[number]['id'];
@@ -320,25 +320,47 @@
 				{/if}
 			{/if}
 
-		{:else if activeSection === 'review'}
+		{:else if activeSection === 'workspace'}
 			<div class="content-header">
-				<h1 class="content-title">Review</h1>
-				<p class="content-desc">Control how AI-generated changes are handled. When review mode is enabled, changes made by agents require your approval before they appear in the editor.</p>
+				<h1 class="content-title">Workspace Mode</h1>
+				<p class="content-desc">Choose how AI agents interact with your code.</p>
 			</div>
 
-			<div class="toggle-row">
-				<div class="toggle-info">
-					<span class="toggle-label">Review Mode</span>
-					<span class="toggle-desc">Require approval for agent changes before they appear in the editor. When off, agent changes are applied immediately.</span>
-				</div>
+			<div class="mode-cards">
 				<button
-					class="toggle-switch"
-					class:on={$settings.reviewEnabled}
-					onclick={() => updateSettings({ reviewEnabled: !$settings.reviewEnabled })}
-					role="switch"
-					aria-checked={$settings.reviewEnabled}
+					class="mode-card"
+					class:selected={$settings.workspaceMode === 'dev'}
+					onclick={() => updateSettings({ workspaceMode: 'dev' })}
 				>
-					<span class="toggle-knob"></span>
+					<div class="mode-card-header">
+						<span class="mode-radio">{$settings.workspaceMode === 'dev' ? '◉' : '○'}</span>
+						<span class="mode-card-title">Dev Mode</span>
+					</div>
+					<p class="mode-card-desc">
+						The agent edits your files directly in the workspace, just like a pair programmer typing alongside you.
+					</p>
+					<p class="mode-card-detail">
+						You manage git yourself — commit, branch, and push when you're ready.
+					</p>
+					<span class="mode-card-best">Best for: quick fixes, exploration, pair programming</span>
+				</button>
+
+				<button
+					class="mode-card"
+					class:selected={$settings.workspaceMode === 'agent'}
+					onclick={() => updateSettings({ workspaceMode: 'agent' })}
+				>
+					<div class="mode-card-header">
+						<span class="mode-radio">{$settings.workspaceMode === 'agent' ? '◉' : '○'}</span>
+						<span class="mode-card-title">Agent Mode</span>
+					</div>
+					<p class="mode-card-desc">
+						Each agent session gets its own isolated branch and worktree. The agent can't touch your main code until you review and approve.
+					</p>
+					<p class="mode-card-detail">
+						Run multiple agents in parallel on different tasks. Review changes file-by-file, then merge or create a PR.
+					</p>
+					<span class="mode-card-best">Best for: features, refactors, multi-agent workflows</span>
 				</button>
 			</div>
 		{:else if activeSection === 'agents'}
@@ -923,6 +945,62 @@
 	}
 
 	/* ── Toggle row ── */
+	.mode-cards {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+		padding: 0 16px;
+	}
+	.mode-card {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding: 16px 20px;
+		background: var(--color-surface);
+		border: 2px solid var(--color-border-muted);
+		border-radius: 10px;
+		cursor: pointer;
+		text-align: left;
+		transition: border-color 0.15s, background 0.15s;
+	}
+	.mode-card:hover {
+		border-color: var(--color-border);
+	}
+	.mode-card.selected {
+		border-color: var(--color-accent);
+		background: color-mix(in srgb, var(--color-accent) 5%, var(--color-surface));
+	}
+	.mode-card-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.mode-radio {
+		font-size: 16px;
+		color: var(--color-accent);
+	}
+	.mode-card-title {
+		font-size: 15px;
+		font-weight: 600;
+		color: var(--color-text);
+	}
+	.mode-card-desc {
+		font-size: 13px;
+		color: var(--color-text-secondary);
+		line-height: 1.5;
+	}
+	.mode-card-detail {
+		font-size: 12px;
+		color: var(--color-text-subtle);
+		line-height: 1.5;
+	}
+	.mode-card-best {
+		font-size: 11px;
+		color: var(--color-accent);
+		font-weight: 500;
+		margin-top: 4px;
+	}
+
 	.toggle-row {
 		display: flex;
 		align-items: center;

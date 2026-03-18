@@ -26,18 +26,18 @@ pub struct TyckSettings {
     pub default_provider: String,
     #[serde(default)]
     pub last_opened_folder: Option<String>,
-    #[serde(default = "default_true")]
-    pub review_enabled: bool,
+    #[serde(default = "default_workspace_mode")]
+    pub workspace_mode: String,
     #[serde(default = "default_theme")]
     pub active_theme: String,
 }
 
 fn default_provider() -> String {
-    "claude-code".to_string()
+    String::new()
 }
 
-fn default_true() -> bool {
-    true
+fn default_workspace_mode() -> String {
+    "dev".to_string()
 }
 
 fn default_theme() -> String {
@@ -49,7 +49,7 @@ impl Default for TyckSettings {
         Self {
             default_provider: default_provider(),
             last_opened_folder: None,
-            review_enabled: true,
+            workspace_mode: default_workspace_mode(),
             active_theme: default_theme(),
         }
     }
@@ -114,7 +114,27 @@ pub fn load_settings() -> TyckSettings {
     let path = settings_path();
     if path.exists() {
         let content = std::fs::read_to_string(&path).unwrap_or_default();
-        serde_json::from_str(&content).unwrap_or_default()
+        // Migrate old reviewEnabled → workspaceMode
+        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+            if json.get("reviewEnabled").is_some() && json.get("workspaceMode").is_none() {
+                let mode = if json["reviewEnabled"].as_bool().unwrap_or(false) {
+                    "agent"
+                } else {
+                    "dev"
+                };
+                json["workspaceMode"] = serde_json::Value::String(mode.to_string());
+                if let Some(obj) = json.as_object_mut() {
+                    obj.remove("reviewEnabled");
+                }
+                // Save migrated settings
+                if let Ok(migrated) = serde_json::to_string_pretty(&json) {
+                    let _ = std::fs::write(&path, migrated);
+                }
+            }
+            serde_json::from_value(json).unwrap_or_default()
+        } else {
+            TyckSettings::default()
+        }
     } else {
         TyckSettings::default()
     }

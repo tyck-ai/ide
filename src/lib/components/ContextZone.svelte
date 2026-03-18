@@ -2,10 +2,16 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-	import { openFileInEditor, projectRoot } from '$lib/stores/editor';
+	import { openFileInEditor, projectRoot, activeWorkingDirectory } from '$lib/stores/editor';
 	import { activeReview } from '$lib/stores/sessionReview';
+	import { isAgentMode } from '$lib/stores/settings';
+	import { activeSessionId } from '$lib/stores/agentTerminal';
 	import { git } from '$lib/stores/git';
+	import { contextTab } from '$lib/stores/sessionContext';
 	import ReviewPanel from './ReviewPanel.svelte';
+	import ReviewFileList from './ReviewFileList.svelte';
+
+	const reviewCount = $derived($activeReview?.diffs.length ?? 0);
 
 	interface DirEntry {
 		name: string;
@@ -45,7 +51,7 @@
 		return map;
 	});
 
-	projectRoot.subscribe(val => {
+	activeWorkingDirectory.subscribe(val => {
 		if (val) {
 			rootPath = val;
 			loadTree(val);
@@ -149,9 +155,43 @@
 </script>
 
 <div class="context-zone">
-	{#if $activeReview?.reviewMode}
+	{#if $isAgentMode && $activeSessionId}
+		<div class="context-tabs">
+			<button class="context-tab" class:active={$contextTab === 'review'} onclick={() => contextTab.set('review')}>
+				Review{#if reviewCount > 0}<span class="tab-badge">{reviewCount}</span>{/if}
+			</button>
+			<button class="context-tab" class:active={$contextTab === 'editor'} onclick={() => contextTab.set('editor')}>
+				Editor
+			</button>
+		</div>
+		{#if $contextTab === 'review'}
+			<ReviewFileList />
+		{:else}
+			<div class="tree">
+				{#snippet renderTree(entries: DirEntry[], depth: number)}
+					{#each entries as entry (entry.path)}
+						{@const gitStatus = getGitStatus(entry)}
+						<button
+							class="tree-item {getGitStatusClass(gitStatus)}"
+							class:is-dir={entry.is_dir}
+							style="padding-left: {12 + depth * 16}px"
+							onclick={() => openFile(entry)}
+						>
+							<span class="icon">{getIcon(entry)}</span>
+							<span class="name">{entry.name}</span>
+						</button>
+						{#if entry.is_dir && expandedDirs.has(entry.path) && entry.children}
+							{@render renderTree(entry.children, depth + 1)}
+						{/if}
+					{/each}
+				{/snippet}
+				{@render renderTree(tree, 0)}
+			</div>
+		{/if}
+	{:else if $isAgentMode && $activeReview?.reviewMode}
 		<ReviewPanel />
-	{:else}
+	{:else if !$isAgentMode}
+		<!-- Dev mode: file explorer -->
 		<div class="header">
 			<span class="title">Explorer</span>
 		</div>
@@ -179,6 +219,7 @@
 			{@render renderTree(tree, 0)}
 		</div>
 	{/if}
+	<!-- Agent mode with no active session: render nothing (InsightZone has the CTA) -->
 </div>
 
 <style>
@@ -188,6 +229,43 @@
 		background: var(--color-base);
 		height: 100%;
 		overflow: hidden;
+	}
+	.context-tabs {
+		display: flex;
+		border-bottom: 1px solid var(--color-border-muted);
+		flex-shrink: 0;
+	}
+	.context-tab {
+		flex: 1;
+		padding: 8px 12px;
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		color: var(--color-text-subtle);
+		font-size: 11px;
+		font-weight: 600;
+		cursor: pointer;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+	}
+	.context-tab:hover {
+		color: var(--color-text);
+	}
+	.context-tab.active {
+		color: var(--color-text);
+		border-bottom-color: var(--color-accent);
+	}
+	.tab-badge {
+		background: var(--color-accent);
+		color: white;
+		font-size: 9px;
+		padding: 1px 5px;
+		border-radius: 8px;
+		font-weight: 700;
 	}
 	.header {
 		padding: 10px 12px;

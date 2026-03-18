@@ -23,3 +23,6 @@ export interface PendingInstall {
   path?: string;
 }
 export const pendingInstall = writable<PendingInstall | null>(null);
+
+// Session sidebar visibility (agent mode)
+export const showSessionSidebar = writable(false);
