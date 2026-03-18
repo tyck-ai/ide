@@ -18,6 +18,12 @@
 	import { sessionReview, activeReview, type MergeResult } from '$lib/stores/sessionReview';
 	import { setMonacoInstance, activeTheme, generateMonacoTheme, applyTheme } from '$lib/themes';
 	import { lspClientManager } from '$lib/lsp/LspClientManager';
+	import { contextMenuStore } from '$lib/stores/lsp';
+	import { checkSingleServer } from '$lib/lsp/serverDiscovery';
+	import { lspMissingServers, dismissedLspNotifications } from '$lib/stores/lsp';
+	import { settings } from '$lib/stores/settings';
+	import { get } from 'svelte/store';
+	import EditorContextMenu from './EditorContextMenu.svelte';
 	import type * as Monaco from 'monaco-editor';
 
 	let editorContainer: HTMLDivElement;
@@ -32,6 +38,7 @@
 	let yoursDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let theirsDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let monaco: typeof Monaco;
+	let inlayHintsEnabled = $state(true);
 	let diffInline = $state(false);
 	let mergeView = $state<'result' | 'yours' | 'theirs'>('result');
 	/** Key of the file currently loaded in the diff editor (sessionId:relPath). Prevents re-creation on every store update. */
@@ -141,6 +148,18 @@
 			wordWrap: 'on',
 			tabSize: 2,
 			scrollbar: { horizontal: 'hidden' },
+			contextmenu: false, // use custom context menu
+		});
+
+		// Custom right-click context menu
+		editor.onContextMenu((e) => {
+			e.event.preventDefault();
+			const file = $activeFile;
+			const lang = file ? getLanguage(file.name) : '';
+			contextMenuStore.set({ visible: true, x: e.event.posx, y: e.event.posy, language: lang });
+		});
+		editor.onMouseDown(() => {
+			contextMenuStore.update((s) => ({ ...s, visible: false }));
 		});
 
 		// Create diff editor eagerly so it's warm when the first diff appears (no creation latency)
@@ -203,10 +222,25 @@
 			});
 		}
 
-		// Save on Ctrl+S / Cmd+S
+		// Save on Ctrl+S / Cmd+S (with optional format-on-save)
 		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
 			const file = $activeFile;
 			if (!file) return;
+
+			// Format before saving if LSP has a formatter and the setting is enabled
+			if (get(settings).lspFormatOnSave) {
+				const lang = getLanguage(file.name);
+				const client = lspClientManager.getActiveClient(lang);
+				const hasFmt = (client as any)?.initializeResult?.capabilities?.documentFormattingProvider;
+				if (hasFmt) {
+					try {
+						await editor!.getAction('editor.action.formatDocument')?.run();
+					} catch {
+						// formatting errors are non-fatal
+					}
+				}
+			}
+
 			const value = editor!.getValue();
 			try {
 				await invoke('write_file', { path: file.path, content: value });
@@ -223,6 +257,26 @@
 			} catch (e) {
 				toast.error(`Failed to save ${file.name}: ${e}`);
 			}
+		});
+
+		// LSP keyboard shortcuts
+		// Cmd+Shift+F — Format document
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF, async () => {
+			await editor!.getAction('editor.action.formatDocument')?.run();
+		});
+		// Cmd+. — Quick fix
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Period, () => {
+			editor!.getAction('editor.action.quickFix')?.run();
+		});
+		// Cmd+T — Workspace symbols
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyT, () => {
+			editor!.getAction('editor.action.showAllSymbols')?.run();
+		});
+		// Cmd+Alt+I — Toggle inlay hints
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyI, () => {
+			inlayHintsEnabled = !inlayHintsEnabled;
+			editor!.updateOptions({ inlayHints: { enabled: inlayHintsEnabled ? 'on' : 'off' } });
+			toast.info(inlayHintsEnabled ? 'Inlay hints enabled' : 'Inlay hints disabled');
 		});
 
 		// Track content changes (skip programmatic setValue calls)
@@ -281,6 +335,27 @@
 			const root = $projectRoot;
 			if (root) {
 				lspClientManager.getOrStart(lang, root).catch(() => {});
+				// Check if the binary is missing and not yet notified
+				const dismissed = get(dismissedLspNotifications);
+				if (!dismissed.has(lang)) {
+					const alreadyNotified = get(lspMissingServers).some((m) => m.language === lang);
+					if (!alreadyNotified) {
+						checkSingleServer(lang).then((status) => {
+							if (!status.available) {
+								lspMissingServers.update((list) => {
+									if (!list.some((m) => m.language === lang)) {
+										list.push({
+											language: lang,
+											displayName: status.language,
+											installHint: status.install_hint,
+										});
+									}
+									return list;
+								});
+							}
+						}).catch(() => {});
+					}
+				}
 			}
 		} else {
 			// No file open — show an empty plaintext model
@@ -841,6 +916,8 @@
 		<div class="editor-container" class:hidden={!$activeFile} bind:this={editorContainer}></div>
 	</div>
 </div>
+
+<EditorContextMenu {editor} />
 
 <style>
 	.focus-zone {

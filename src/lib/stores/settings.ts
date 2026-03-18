@@ -8,6 +8,7 @@ export interface TyckSettings {
 	lastOpenedFolder?: string;
 	workspaceMode: WorkspaceMode;
 	activeTheme: string;
+	lspFormatOnSave?: boolean;
 }
 
 export interface ProviderInfo {

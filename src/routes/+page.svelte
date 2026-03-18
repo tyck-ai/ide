@@ -18,6 +18,7 @@
 	import AppLauncher from '$lib/components/AppLauncher.svelte';
 	import PermissionReview from '$lib/components/PermissionReview.svelte';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
+	import LspMissingNotification from '$lib/components/LspMissingNotification.svelte';
 	import SessionBar from '$lib/components/SessionBar.svelte';
 	import SessionSidebar from '$lib/components/SessionSidebar.svelte';
 	import { isAgentMode } from '$lib/stores/settings';
@@ -31,6 +32,7 @@
 	import { toggleTerminal, terminalVisible } from '$lib/stores/terminal';
 	import { startAgentStatusListener } from '$lib/stores/agentStatus';
 	import { startGitPoller, git } from '$lib/stores/git';
+	import { checkProjectOnOpen } from '$lib/lsp/serverDiscovery';
 	import { initSettings, updateSettings, settings } from '$lib/stores/settings';
 	import { applyDefaultProvider } from '$lib/stores/agentProvider';
 	import { get } from 'svelte/store';
@@ -109,6 +111,8 @@
 		projectRoot.set(cwd);
 		startGitPoller(cwd);
 		await updateSettings({ lastOpenedFolder: cwd });
+		// Non-blocking: detect project languages and warn about missing servers
+		checkProjectOnOpen(cwd).catch(() => {});
 	}
 
 	async function openFolder() {
@@ -301,6 +305,7 @@
 {/if}
 
 <ToastContainer />
+<LspMissingNotification />
 
 <style>
 	:global(*) {
