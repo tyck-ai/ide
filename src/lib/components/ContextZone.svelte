@@ -7,10 +7,10 @@
 	import { isAgentMode } from '$lib/stores/settings';
 	import { activeSessionId } from '$lib/stores/agentTerminal';
 	import { git } from '$lib/stores/git';
+	import { contextTab } from '$lib/stores/sessionContext';
 	import ReviewPanel from './ReviewPanel.svelte';
 	import ReviewFileList from './ReviewFileList.svelte';
 
-	let contextTab = $state<'editor' | 'review'>('review');
 	const reviewCount = $derived($activeReview?.diffs.length ?? 0);
 
 	interface DirEntry {
@@ -157,14 +157,14 @@
 <div class="context-zone">
 	{#if $isAgentMode && $activeSessionId}
 		<div class="context-tabs">
-			<button class="context-tab" class:active={contextTab === 'review'} onclick={() => contextTab = 'review'}>
+			<button class="context-tab" class:active={$contextTab === 'review'} onclick={() => contextTab.set('review')}>
 				Review{#if reviewCount > 0}<span class="tab-badge">{reviewCount}</span>{/if}
 			</button>
-			<button class="context-tab" class:active={contextTab === 'editor'} onclick={() => contextTab = 'editor'}>
+			<button class="context-tab" class:active={$contextTab === 'editor'} onclick={() => contextTab.set('editor')}>
 				Editor
 			</button>
 		</div>
-		{#if contextTab === 'review'}
+		{#if $contextTab === 'review'}
 			<ReviewFileList />
 		{:else}
 			<div class="tree">
@@ -188,9 +188,10 @@
 				{@render renderTree(tree, 0)}
 			</div>
 		{/if}
-	{:else if $activeReview?.reviewMode}
+	{:else if $isAgentMode && $activeReview?.reviewMode}
 		<ReviewPanel />
-	{:else}
+	{:else if !$isAgentMode}
+		<!-- Dev mode: file explorer -->
 		<div class="header">
 			<span class="title">Explorer</span>
 		</div>
@@ -218,6 +219,7 @@
 			{@render renderTree(tree, 0)}
 		</div>
 	{/if}
+	<!-- Agent mode with no active session: render nothing (InsightZone has the CTA) -->
 </div>
 
 <style>

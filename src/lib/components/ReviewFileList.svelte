@@ -1,13 +1,40 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
+	import { listen } from '@tauri-apps/api/event';
 	import { sessionReview, activeReview, type WorktreeFileDiff } from '$lib/stores/sessionReview';
 	import { activeSessionId, activeSession } from '$lib/stores/agentTerminal';
-	import { projectRoot } from '$lib/stores/editor';
+	import { projectRoot, openFileInEditor } from '$lib/stores/editor';
 	import { toast } from '$lib/stores/toast';
+	import { git } from '$lib/stores/git';
 
 	let merging = $state(false);
 	let pushing = $state(false);
 	let hasRemote = $state(false);
+
+	// Track when the agent (via MCP) requested the PR — show a warning in the modal.
+	let agentRequestedPR = $state(false);
+
+	// Count of files the user hasn't explicitly accepted or rejected yet.
+	const pendingReviewCount = $derived(
+		($activeReview?.diffs ?? []).filter(d => {
+			const dec = $activeReview?.fileDecisions.get(d.path);
+			return dec === 'pending' || dec === 'conflict';
+		}).length
+	);
+
+	// Listen for MCP push-pr-requested event.
+	$effect(() => {
+		let unlisten: (() => void) | undefined;
+		listen<{ title?: string; body?: string } | null>('push-pr-requested', (event) => {
+			const data = event.payload;
+			const session = $activeSession;
+			prTitle = data?.title || session?.instructions || session?.label || session?.branchName || '';
+			prBody = data?.body || buildDefaultPrBody();
+			agentRequestedPR = true;
+			showPrModal = true;
+		}).then(fn => { unlisten = fn; });
+		return () => { unlisten?.(); };
+	});
 
 	// Check if remote exists
 	$effect(() => {
@@ -33,17 +60,25 @@
 		await invoke('git_revert_files', { path: worktreePath, files: rejected });
 	}
 
+	let showMergeModal = $state(false);
 	let showPrModal = $state(false);
 	let prTitle = $state('');
 	let prBody = $state('');
+
+	function buildDefaultPrBody(): string {
+		const session = $activeSession;
+		if (!session) return '';
+		return `## Changes\n\nAgent session: ${session.label}\nBranch: ${session.branchName}\n\n${
+			($activeReview?.diffs ?? []).map(d => `- ${d.status === 'A' ? 'Added' : d.status === 'D' ? 'Deleted' : 'Modified'} \`${d.path}\``).join('\n')
+		}`;
+	}
 
 	function openPrModal() {
 		const session = $activeSession;
 		if (!session) return;
 		prTitle = session.instructions || session.label || session.branchName;
-		prBody = `## Changes\n\nAgent session: ${session.label}\nBranch: ${session.branchName}\n\n${
-			($activeReview?.diffs ?? []).map(d => `- ${d.status === 'A' ? 'Added' : d.status === 'D' ? 'Deleted' : 'Modified'} \`${d.path}\``).join('\n')
-		}`;
+		prBody = buildDefaultPrBody();
+		agentRequestedPR = false;
 		showPrModal = true;
 	}
 
@@ -117,10 +152,23 @@
 		return $activeReview?.conflicts.get(path);
 	}
 
-	function selectFile(path: string) {
-		if ($activeSessionId) {
-			sessionReview.selectReviewFile($activeSessionId, path);
-			sessionReview.enterReviewMode($activeSessionId);
+	async function selectFile(path: string) {
+		const review = $activeReview;
+		const sid = $activeSessionId;
+		if (!review || !sid) return;
+
+		// Refresh diffs to ensure we have the latest state before navigating
+		await sessionReview.refreshDiffs(sid);
+
+		// Open the file from the worktree so the inline diff auto-triggers in FocusZone
+		const fullPath = review.worktreePath + '/' + path;
+		const name = path.split('/').pop() ?? path;
+		try {
+			const content = await invoke<string>('read_file', { path: fullPath });
+			openFileInEditor(fullPath, name, content);
+		} catch {
+			// Added file may not exist in main yet — open with empty content
+			openFileInEditor(fullPath, name, '');
 		}
 	}
 
@@ -229,23 +277,57 @@
 		{/if}
 
 		<div class="review-actions">
-			<button class="review-btn merge" onclick={mergeToMain} disabled={merging || totalPending === 0}>
-				{merging ? 'Merging...' : 'Merge to Main'}
-			</button>
 			{#if hasRemote}
 				<button class="review-btn push" onclick={openPrModal} disabled={pushing || totalPending === 0}>
 					{pushing ? 'Pushing...' : 'Push & PR'}
 				</button>
 			{/if}
+			<button class="review-btn merge" onclick={() => showMergeModal = true} disabled={merging || totalPending === 0}>
+				{merging ? 'Merging...' : 'Merge to Workspace'}
+			</button>
 		</div>
 	{/if}
 </div>
 
+{#if showMergeModal}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div class="pr-backdrop" onclick={() => showMergeModal = false}>
+		<div class="pr-modal" onclick={(e) => e.stopPropagation()}>
+			<div class="pr-title">Merge to Workspace</div>
+			<div class="merge-explain">
+				<p>This will merge the code from the agent's worktree branch into your main workspace.</p>
+				<p>Changes will land on the branch currently checked out: <strong class="branch-name">{$git.branch || 'main'}</strong></p>
+				<p class="merge-note">Any files you marked as rejected will be excluded from the merge.</p>
+			</div>
+			<div class="pr-actions">
+				<button class="pr-btn cancel" onclick={() => showMergeModal = false}>Cancel</button>
+				<button class="pr-btn create" onclick={() => { showMergeModal = false; mergeToMain(); }} disabled={merging}>
+					{merging ? 'Merging...' : 'Confirm Merge'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
 {#if showPrModal}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div class="pr-backdrop" onclick={() => showPrModal = false}>
+	<div class="pr-backdrop" onclick={() => { showPrModal = false; agentRequestedPR = false; }}>
 		<div class="pr-modal" onclick={(e) => e.stopPropagation()}>
 			<div class="pr-title">Create Pull Request</div>
+
+			{#if agentRequestedPR && pendingReviewCount > 0}
+				<div class="pending-warning">
+					<span class="warn-icon">⚠</span>
+					<span>
+						<strong>{pendingReviewCount} file{pendingReviewCount !== 1 ? 's' : ''}</strong> still pending review.
+						Pushing now will include the agent's version of those files as-is.
+					</span>
+					<button class="review-first-btn" onclick={() => { showPrModal = false; agentRequestedPR = false; }}>
+						Review first
+					</button>
+				</div>
+			{/if}
+
 			<label class="pr-field">
 				<span class="pr-label">Title</span>
 				<input class="pr-input" bind:value={prTitle} />
@@ -255,7 +337,7 @@
 				<textarea class="pr-input pr-textarea" bind:value={prBody} rows="6"></textarea>
 			</label>
 			<div class="pr-actions">
-				<button class="pr-btn cancel" onclick={() => showPrModal = false}>Cancel</button>
+				<button class="pr-btn cancel" onclick={() => { showPrModal = false; agentRequestedPR = false; }}>Cancel</button>
 				<button class="pr-btn create" onclick={pushAndPr} disabled={pushing}>
 					{pushing ? 'Creating...' : 'Push & Create PR'}
 				</button>
@@ -344,31 +426,37 @@
 
 	.review-actions {
 		display: flex;
-		gap: 8px;
+		flex-direction: column;
+		gap: 6px;
 		padding: 12px;
 		border-top: 1px solid var(--color-border-muted);
 		margin-top: 8px;
 	}
 	.review-btn {
-		flex: 1;
+		width: 100%;
 		padding: 8px 12px;
 		border-radius: 6px;
 		font-size: 12px;
 		font-weight: 600;
 		cursor: pointer;
-		border: none;
 	}
 	.review-btn:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
-	.review-btn.merge {
-		background: var(--color-success, #238636);
-		color: white;
-	}
 	.review-btn.push {
 		background: var(--color-accent);
+		border: none;
 		color: white;
+	}
+	.review-btn.merge {
+		background: transparent;
+		border: 1px solid var(--color-border);
+		color: var(--color-text-secondary);
+	}
+	.review-btn.merge:not(:disabled):hover {
+		border-color: var(--color-text-muted);
+		color: var(--color-text);
 	}
 
 	.pr-backdrop {
@@ -394,6 +482,24 @@
 	.pr-title {
 		font-size: 16px;
 		font-weight: 600;
+	}
+	.merge-explain {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		font-size: 13px;
+		color: var(--color-text-secondary);
+		line-height: 1.5;
+	}
+	.branch-name {
+		font-family: 'SF Mono', 'Fira Code', monospace;
+		font-size: 12px;
+		color: var(--color-accent);
+		font-weight: 700;
+	}
+	.merge-note {
+		font-size: 12px;
+		color: var(--color-text-subtle);
 	}
 	.pr-field {
 		display: flex;
@@ -440,4 +546,39 @@
 		color: white;
 	}
 	.pr-btn.create:disabled { opacity: 0.5; cursor: not-allowed; }
+
+	.pending-warning {
+		display: flex;
+		align-items: flex-start;
+		gap: 8px;
+		padding: 10px 12px;
+		background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
+		border-radius: 6px;
+		font-size: 12px;
+		color: var(--color-text-secondary);
+		line-height: 1.5;
+	}
+	.warn-icon {
+		font-size: 14px;
+		flex-shrink: 0;
+		margin-top: 1px;
+	}
+	.pending-warning span { flex: 1; }
+	.review-first-btn {
+		flex-shrink: 0;
+		background: none;
+		border: 1px solid var(--color-border);
+		border-radius: 4px;
+		padding: 3px 8px;
+		font-size: 11px;
+		font-weight: 500;
+		cursor: pointer;
+		color: var(--color-text);
+		white-space: nowrap;
+	}
+	.review-first-btn:hover {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
 </style>

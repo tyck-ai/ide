@@ -1722,8 +1722,11 @@ pub fn find_worktree_for_resume(
 pub fn discover_provider_session_for_worktree(worktree_session_id: String) -> Result<Option<String>, String> {
     let info = load_worktree_meta(&worktree_session_id)?;
     
-    let provider_id = info.provider_id.as_deref().unwrap_or("claude-code");
-    
+    let provider_id = match info.provider_id.as_deref() {
+        Some(id) if !id.is_empty() => id,
+        _ => return Ok(None),
+    };
+
     let session_id = match provider_id {
         "claude-code" => discover_claude_session(&info)?,
         "codex" => discover_codex_session(&info)?,

@@ -2,15 +2,12 @@
 	import { get } from 'svelte/store';
 	import { invoke } from '@tauri-apps/api/core';
 	import { isAgentMode, isDevMode, settings, updateSettings } from '$lib/stores/settings';
-	import { agentSessions } from '$lib/stores/agentTerminal';
 	import { projectRoot } from '$lib/stores/editor';
 	import { toast } from '$lib/stores/toast';
 	import { startGitPoller } from '$lib/stores/git';
 
 	let showDropdown = $state(false);
-	let showWarning = $state(false);
 	let showGitInit = $state(false);
-	let pendingMode = $state<'dev' | 'agent' | null>(null);
 	let initializingGit = $state(false);
 
 	function toggleDropdown() {
@@ -21,13 +18,6 @@
 		showDropdown = false;
 
 		if (mode === $settings.workspaceMode) return;
-
-		// Warn if switching from agent → dev with active sessions
-		if (mode === 'dev' && $agentSessions.length > 0) {
-			pendingMode = mode;
-			showWarning = true;
-			return;
-		}
 
 		// Check for git repo when switching to agent mode
 		if (mode === 'agent') {
@@ -41,6 +31,7 @@
 			}
 		}
 
+		// Sessions and worktrees are always preserved — switching mode is non-destructive.
 		updateSettings({ workspaceMode: mode });
 	}
 
@@ -59,19 +50,6 @@
 		initializingGit = false;
 		showGitInit = false;
 	}
-
-	function confirmSwitch() {
-		if (pendingMode) {
-			updateSettings({ workspaceMode: pendingMode });
-		}
-		showWarning = false;
-		pendingMode = null;
-	}
-
-	function cancelSwitch() {
-		showWarning = false;
-		pendingMode = null;
-	}
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -89,7 +67,7 @@
 				<span class="dropdown-radio">{$isDevMode ? '◉' : '○'}</span>
 				<div class="dropdown-info">
 					<span class="dropdown-label">Dev Mode</span>
-					<span class="dropdown-desc">Agent edits your files directly. You control git.</span>
+					<span class="dropdown-desc">Edit files directly. Agent sessions remain open in the background.</span>
 				</div>
 			</button>
 			<button class="dropdown-item" class:selected={$isAgentMode} onclick={() => selectMode('agent')}>
@@ -102,24 +80,6 @@
 		</div>
 	{/if}
 </div>
-
-{#if showWarning}
-	<div class="warning-backdrop" onclick={cancelSwitch}>
-		<div class="warning-modal" onclick={(e) => e.stopPropagation()}>
-			<div class="warning-title">Switch to Dev Mode?</div>
-			<div class="warning-text">
-				You have {$agentSessions.length} active agent session{$agentSessions.length > 1 ? 's' : ''}.
-				Switching will close them and clean up their worktrees.
-				<br /><br />
-				Unsaved changes in agent sessions will be lost.
-			</div>
-			<div class="warning-actions">
-				<button class="warning-btn cancel" onclick={cancelSwitch}>Cancel</button>
-				<button class="warning-btn confirm" onclick={confirmSwitch}>Switch Anyway</button>
-			</div>
-		</div>
-	</div>
-{/if}
 
 {#if showGitInit}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->

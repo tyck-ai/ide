@@ -25,9 +25,14 @@ export interface AgentSession {
 	instructions?: string;
 	resumeSessionId?: string;
 	createdAt: number;
+	mode: 'dev' | 'agent';
 }
 
 export const agentSessions = writable<AgentSession[]>([]);
+
+// Mode-filtered views — use these in components instead of raw agentSessions
+export const devSessions = derived(agentSessions, $s => $s.filter(s => s.mode === 'dev'));
+export const agentModeSessions = derived(agentSessions, $s => $s.filter(s => s.mode === 'agent'));
 
 export const activeSession = derived(
 	[agentSessions, activeSessionId],
@@ -55,7 +60,7 @@ async function stopProviderSessionDiscovery(worktreeSessionId: string): Promise<
 	}
 }
 
-export async function spawnAgentSession(resumeSessionId?: string, providerId?: string, resumeSessionPath?: string): Promise<string> {
+export async function spawnAgentSession(resumeSessionId?: string, providerId?: string, resumeSessionPath?: string, name?: string): Promise<string> {
 	const provider = providerId
 		? get(agentProviders).find(p => p.id === providerId) ?? get(activeProvider)
 		: get(activeProvider);
@@ -118,7 +123,7 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	const agentMode = get(isAgentMode);
 	
 	// Pass --resume when resuming an existing session
-	// Always use the Claude session ID (resumeSessionId), not the worktree ID
+	// Always use the provider's session ID (resumeSessionId), not the worktree ID
 	if (resumeSessionId) {
 		const resumeArgs = await invoke<string[]>('get_resume_args', {
 			provider: provider.id,
@@ -226,9 +231,8 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	}
 
 	sessionCounter++;
-	const label = resumeSessionId
-		? `Resumed ${resumeSessionId.slice(0, 8)}`
-		: `Session ${sessionCounter}`;
+	const label = name?.trim()
+		|| (resumeSessionId ? `Resumed ${resumeSessionId.slice(0, 8)}` : `Session ${sessionCounter}`);
 
 	const session: AgentSession = {
 		id,
@@ -240,10 +244,19 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 		status: 'working',
 		resumeSessionId,
 		createdAt: Date.now(),
+		mode: agentMode ? 'agent' : 'dev',
 	};
 
 	agentSessions.update(s => [...s, session]);
-	activeSessionId.set(id);
+
+	// When in agent mode, save previous session state and init fresh state for this one.
+	// In dev mode, spawning doesn't affect file context — InsightZone manages dev sessions independently.
+	if (agentMode) {
+		switchSessionContext(id); // saves current, restores (or inits) new
+		activeSessionId.set(id);
+	} else {
+		activeSessionId.set(id);
+	}
 	activeWorktreePath.set(session.worktreePath || null);
 
 	return id;
@@ -301,7 +314,7 @@ export async function resumeAgent(sessionId: string) {
 	}
 
 	try {
-		await invoke('write_terminal', { id: sessionId, data: prompt + '\n' });
+		await invoke('write_terminal', { id: sessionId, data: prompt + '\r' });
 	} catch { /* terminal may be closed */ }
 	updateSessionStatus(sessionId, 'working');
 }

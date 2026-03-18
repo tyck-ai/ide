@@ -40,6 +40,7 @@ export interface SessionReviewState {
 	conflicts: Map<string, string>;
 	/** Files that have been processed (accepted/rejected) - excluded from future polling */
 	processedFiles: Set<string>;
+
 	reviewMode: boolean;
 	selectedFile: string | null;
 	error: string | null;
@@ -50,21 +51,19 @@ function createSessionReviewStore() {
 	const sessions = writable<Map<string, SessionReviewState>>(new Map());
 	const { subscribe, update } = sessions;
 
-	const pollIntervals = new Map<string, ReturnType<typeof setInterval>>();
 	const fsUnlistens = new Map<string, () => void>();
 	const refreshInFlight = new Set<string>();
 
+	/** Paths (relative to worktree) saved by the developer — excluded from review. */
+	const devEditedPaths = new Map<string, Set<string>>();
+
 	function cleanupSession(sessionId: string) {
-		const interval = pollIntervals.get(sessionId);
-		if (interval) {
-			clearInterval(interval);
-			pollIntervals.delete(sessionId);
-		}
 		const unlisten = fsUnlistens.get(sessionId);
 		if (unlisten) {
 			unlisten();
 			fsUnlistens.delete(sessionId);
 		}
+		devEditedPaths.delete(sessionId);
 	}
 
 	function getSession(sessionId: string): SessionReviewState | undefined {
@@ -92,13 +91,7 @@ function createSessionReviewStore() {
 			return next;
 		});
 
-		// Start polling for changes in the worktree
-		pollIntervals.set(
-			sessionId,
-			setInterval(() => refreshDiffs(sessionId), 3000)
-		);
-
-		// Listen for fs-change events
+		// Listen for fs-change events — fires immediately when agent writes a file
 		try {
 			const unlisten = await listen('fs-change', () => refreshDiffs(sessionId));
 			fsUnlistens.set(sessionId, unlisten);
@@ -146,8 +139,11 @@ function createSessionReviewStore() {
 				const s = next.get(sessionId);
 				if (!s) return map;
 
-				// Filter out files that have already been processed (accepted/rejected)
-				const diffs = allDiffs.filter(d => !s.processedFiles.has(d.path));
+				// Filter out processed files and files the dev saved manually
+				const devPaths = devEditedPaths.get(sessionId) ?? new Set<string>();
+				const diffs = allDiffs.filter(d =>
+					!s.processedFiles.has(d.path) && !devPaths.has(d.path)
+				);
 
 				// Check if any conflicted files have changed (agent may have resolved them)
 				const conflicts = new Map(s.conflicts);
@@ -480,6 +476,24 @@ function createSessionReviewStore() {
 		return unprocessedDiffs.length > 0;
 	}
 
+
+	/**
+	 * Mark a file as saved by the developer so it is excluded from the review tab.
+	 * The file stays excluded for the lifetime of the session.
+	 */
+	function markDevSaved(sessionId: string, absolutePath: string) {
+		const session = getSession(sessionId);
+		if (!session) return;
+
+		// Convert absolute path to worktree-relative path
+		const prefix = session.worktreePath.endsWith('/') ? session.worktreePath : session.worktreePath + '/';
+		if (!absolutePath.startsWith(prefix)) return;
+		const relativePath = absolutePath.slice(prefix.length);
+
+		if (!devEditedPaths.has(sessionId)) devEditedPaths.set(sessionId, new Set());
+		devEditedPaths.get(sessionId)!.add(relativePath);
+	}
+
 	return {
 		subscribe,
 		registerSession,
@@ -495,8 +509,10 @@ function createSessionReviewStore() {
 		resolveConflict,
 		removeSession,
 		removeSessionFromState,
+		removeFileFromReview,
 		finalizeReview,
 		hasPendingChanges,
+		markDevSaved,
 	};
 }
 

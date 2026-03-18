@@ -34,6 +34,9 @@ export const agentStatusConnected = writable<boolean>(false);
 // Per-session status cache so we can switch without losing data
 const statusCache = new Map<string, AgentStatus>();
 
+// All sessions' statuses — reactive, keyed by session ID
+export const allSessionStatuses = writable<Record<string, AgentStatus>>({});
+
 // Which session ID the AwarenessBar is currently showing
 let currentActiveId: string | null = null;
 
@@ -59,6 +62,7 @@ export function switchActiveStatus(sessionId: string) {
  */
 export function recordStatus(watcherId: string, status: AgentStatus) {
 	statusCache.set(watcherId, status);
+	allSessionStatuses.update(map => ({ ...map, [watcherId]: status }));
 	if (watcherId === currentActiveId) {
 		agentStatus.set(status);
 		agentStatusConnected.set(true);

@@ -1,8 +1,9 @@
 mod commands;
+mod mcp;
 mod wasm;
 mod apps;
 
-use commands::{agent, checkpoint, fs, git, settings, terminal, tyck, worktree};
+use commands::{checkpoint, fs, git, settings, terminal, tyck, worktree};
 use apps::commands as tapp_commands;
 use apps::manager::create_shared_manager;
 use apps::store::AppStore;
@@ -34,6 +35,15 @@ pub fn run() {
         .manage(app_manager)
         .manage(app_store)
         .setup(|app| {
+            // Start the MCP server so agents can call push_and_create_pr.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match mcp::start_mcp_server(handle).await {
+                    Ok(port) => log::info!("[mcp] Ready on port {}", port),
+                    Err(e) => log::warn!("[mcp] Failed to start: {}", e),
+                }
+            });
+
             let open_folder_item = MenuItemBuilder::new("Open Folder...")
                 .accelerator("CmdOrCtrl+O")
                 .id("open-folder")
@@ -122,8 +132,6 @@ pub fn run() {
             git::git_blame_file,
             git::watch_git_directory,
             git::stop_git_watching,
-            agent::start_agent,
-            agent::stop_agent,
             terminal::spawn_terminal,
             terminal::spawn_agent_terminal,
             terminal::write_terminal,

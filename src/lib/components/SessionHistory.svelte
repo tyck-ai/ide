@@ -1,6 +1,6 @@
 <script lang="ts">
 	import {
-		agentSessions,
+		agentModeSessions,
 		switchAgentSession,
 		closeAgentSession,
 		type AgentSession,
@@ -45,8 +45,8 @@
 		onClose();
 	}
 
-	const activeSessions = $derived($agentSessions.filter(s => s.status !== 'done'));
-	const completedSessions = $derived($agentSessions.filter(s => s.status === 'done'));
+	const activeSessions = $derived($agentModeSessions.filter(s => s.status !== 'done'));
+	const completedSessions = $derived($agentModeSessions.filter(s => s.status === 'done'));
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -57,7 +57,7 @@
 			<button class="history-close" onclick={onClose}>×</button>
 		</div>
 
-		{#if $agentSessions.length === 0}
+		{#if $agentModeSessions.length === 0}
 			<div class="empty">
 				<span class="empty-text">No sessions yet</span>
 			</div>

@@ -285,7 +285,7 @@
 
 	.app-item:disabled {
 		opacity: 0.7;
-		cursor: wait;
+		cursor: default;
 	}
 
 	.app-indicator {

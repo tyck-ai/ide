@@ -1,5 +1,7 @@
-import { get } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 import { openFiles, activeFilePath, type OpenFile } from './editor';
+
+export type ContextTab = 'editor' | 'review';
 
 /**
  * Per-session UI state that gets saved when switching away from a session
@@ -8,10 +10,14 @@ import { openFiles, activeFilePath, type OpenFile } from './editor';
 interface SessionState {
 	openFiles: OpenFile[];
 	activeFilePath: string | null;
+	contextTab: ContextTab;
 }
 
 const sessionStates = new Map<string, SessionState>();
 let currentSessionId: string | null = null;
+
+/** The active context tab (Review / Editor) in agent mode — per session. */
+export const contextTab = writable<ContextTab>('review');
 
 /** Save the current session's UI state before switching away */
 export function saveCurrentSessionState() {
@@ -19,6 +25,7 @@ export function saveCurrentSessionState() {
 	sessionStates.set(currentSessionId, {
 		openFiles: get(openFiles),
 		activeFilePath: get(activeFilePath),
+		contextTab: get(contextTab),
 	});
 }
 
@@ -28,9 +35,12 @@ export function restoreSessionState(sessionId: string) {
 	if (state) {
 		openFiles.set(state.openFiles);
 		activeFilePath.set(state.activeFilePath);
+		contextTab.set(state.contextTab);
 	} else {
-		// New session — start with no files open
-		// Don't clear globally — filter will handle visibility
+		// New session — start fresh with Review tab open
+		openFiles.set([]);
+		activeFilePath.set(null);
+		contextTab.set('review');
 	}
 	currentSessionId = sessionId;
 }

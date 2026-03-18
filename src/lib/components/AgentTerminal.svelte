@@ -13,6 +13,7 @@
 	let unlistenExit: (() => void) | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let fitTimeout: ReturnType<typeof setTimeout> | null = null;
+	let loaded = $state(false);
 
 	function safeFit() {
 		if (!fitAddon || !terminal || !termEl) return;
@@ -66,6 +67,8 @@
 			}
 		} catch { /* no backlog yet */ }
 
+		loaded = true;
+
 		// Listen for live PTY output
 		unlistenOutput = await listen<string>(`pty-output-${sessionId}`, (event) => {
 			terminal.write(event.payload);
@@ -96,13 +99,68 @@
 	});
 </script>
 
-<div class="agent-terminal" bind:this={termEl}></div>
+<div class="terminal-wrap">
+	{#if !loaded}
+		<div class="terminal-loading">
+			<div class="loading-dots">
+				<span></span><span></span><span></span>
+			</div>
+			<p class="loading-text">Starting agent...</p>
+		</div>
+	{/if}
+	<div class="agent-terminal" class:invisible={!loaded} bind:this={termEl}></div>
+</div>
 
 <style>
+	.terminal-wrap {
+		width: 100%;
+		height: 100%;
+		position: relative;
+		overflow: hidden;
+	}
+	.terminal-loading {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 16px;
+		cursor: default;
+		z-index: 2;
+	}
+	.loading-dots {
+		display: flex;
+		gap: 6px;
+		align-items: center;
+	}
+	.loading-dots span {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--color-text-subtle);
+		opacity: 0.4;
+		animation: blink 1.2s infinite ease-in-out;
+	}
+	.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+	.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+	@keyframes blink {
+		0%, 80%, 100% { opacity: 0.15; transform: scale(1); }
+		40% { opacity: 0.8; transform: scale(1.2); }
+	}
+	.loading-text {
+		font-size: 12px;
+		color: var(--color-text-subtle);
+		margin: 0;
+	}
 	.agent-terminal {
 		width: 100%;
 		height: 100%;
 		overflow: hidden;
+	}
+	.agent-terminal.invisible {
+		opacity: 0;
+		pointer-events: none;
 	}
 	.agent-terminal :global(.xterm) {
 		height: 100%;

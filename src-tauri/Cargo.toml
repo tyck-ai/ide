@@ -46,6 +46,10 @@ dirs = "5"
 async-trait = "0.1"
 futures = "0.3"
 
+# MCP HTTP server (push_and_create_pr tool)
+axum = "0.8"
+tokio-stream = "0.1"
+
 # Error handling
 thiserror = "2"
 anyhow = "1"

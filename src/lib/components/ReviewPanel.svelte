@@ -81,7 +81,7 @@
 
 		const message = `Please resolve the merge conflicts in the following files. The files contain conflict markers (<<<<<<< ======= >>>>>>>) that need to be resolved:\n${conflictedFiles.map(f => `- ${f}`).join('\n')}\n`;
 		
-		await invoke('write_terminal', { id: sid, data: message + '\n' });
+		await invoke('write_terminal', { id: sid, data: message + '\r' });
 	}
 </script>
 

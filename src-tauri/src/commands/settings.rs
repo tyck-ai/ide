@@ -33,7 +33,7 @@ pub struct TyckSettings {
 }
 
 fn default_provider() -> String {
-    "claude-code".to_string()
+    String::new()
 }
 
 fn default_workspace_mode() -> String {

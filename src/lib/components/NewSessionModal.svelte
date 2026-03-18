@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { agentProviders, activeProviderId } from '$lib/stores/agentProvider';
-	import { spawnAgentSession } from '$lib/stores/agentTerminal';
+	import { agentSessions, spawnAgentSession } from '$lib/stores/agentTerminal';
+	import { pickSessionName } from '$lib/utils/sessionNames';
 	import { invoke } from '@tauri-apps/api/core';
+	import { get } from 'svelte/store';
 
 	interface Props {
 		onClose: () => void;
@@ -9,8 +11,10 @@
 
 	let { onClose }: Props = $props();
 
+	const usedNames = new Set(get(agentSessions).map(s => s.label));
+	let sessionName = $state(pickSessionName(usedNames));
 	let branchName = $state(`feat/${crypto.randomUUID().slice(0, 8)}`);
-	let selectedProvider = $state($activeProviderId ?? 'claude-code');
+	let selectedProvider = $state($activeProviderId || $agentProviders[0]?.id || '');
 	let instructions = $state('');
 	let starting = $state(false);
 	let error = $state<string | null>(null);
@@ -21,12 +25,12 @@
 		error = null;
 
 		try {
-			const sessionId = await spawnAgentSession(undefined, selectedProvider);
+			const sessionId = await spawnAgentSession(undefined, selectedProvider, undefined, sessionName.trim() || undefined);
 
 			// If instructions provided, send them as the first message
 			// Retry a few times since the agent takes a moment to initialize
 			if (instructions.trim()) {
-				const msg = instructions.trim() + '\n';
+				const msg = instructions.trim() + '\r';
 				const sendWithRetry = async (attempts: number, delay: number) => {
 					for (let i = 0; i < attempts; i++) {
 						await new Promise(r => setTimeout(r, delay));
@@ -38,7 +42,7 @@
 						}
 					}
 				};
-				sendWithRetry(5, 2000);
+				sendWithRetry(5, 2000).catch(() => console.warn('Failed to send initial instructions to agent'));
 			}
 
 			onClose();
@@ -60,6 +64,17 @@
 <div class="modal-backdrop" onclick={onClose}>
 	<div class="modal" onclick={(e) => e.stopPropagation()}>
 		<div class="modal-title">New Agent Session</div>
+
+		<label class="field">
+			<span class="field-label">Name</span>
+			<input
+				type="text"
+				class="field-input"
+				bind:value={sessionName}
+				placeholder="Session name"
+				maxlength="32"
+			/>
+		</label>
 
 		<label class="field">
 			<span class="field-label">Branch name</span>

@@ -9,7 +9,7 @@
 	let { onClose }: Props = $props();
 
 	let description = $state('');
-	let selectedAgent = $state($activeProviderId ?? 'claude-code');
+	let selectedAgent = $state($activeProviderId || $agentProviders[0]?.id || '');
 	let maxParallel = $state(3);
 	let phase = $state<'describe' | 'plan'>('describe');
 	let tasks = $state<{ description: string; branchName: string; enabled: boolean }[]>([]);
