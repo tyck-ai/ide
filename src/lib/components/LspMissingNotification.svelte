@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { lspMissingServers, dismissedLspNotifications } from '$lib/stores/lsp';
+	import { sendCommandToTerminal } from '$lib/stores/terminal';
+
+	let running = $state<string | null>(null);
 
 	function dismiss(language: string) {
 		lspMissingServers.update((list) => list.filter((s) => s.language !== language));
@@ -17,6 +20,13 @@
 			});
 			return [];
 		});
+	}
+
+	async function runInstall(server: { language: string; installHint: string }) {
+		running = server.language;
+		await sendCommandToTerminal(server.installHint);
+		running = null;
+		dismiss(server.language);
 	}
 </script>
 
@@ -38,7 +48,17 @@
 						<span class="server-name">{server.displayName}</span>
 						<code class="install-hint">{server.installHint}</code>
 					</div>
-					<button class="dismiss-btn" onclick={() => dismiss(server.language)} title="Dismiss">✕</button>
+					<div class="server-actions">
+						<button
+							class="run-btn"
+							onclick={() => runInstall(server)}
+							disabled={running === server.language}
+							title="Run install command in terminal"
+						>
+							{running === server.language ? '...' : 'Install'}
+						</button>
+						<button class="dismiss-btn" onclick={() => dismiss(server.language)} title="Dismiss">✕</button>
+					</div>
 				</div>
 			{/each}
 		</div>
@@ -135,6 +155,34 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	.server-actions {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		flex-shrink: 0;
+	}
+
+	.run-btn {
+		background: var(--color-accent);
+		border: none;
+		border-radius: 4px;
+		color: var(--color-base);
+		font-size: 10px;
+		font-weight: 700;
+		padding: 3px 8px;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	.run-btn:hover:not(:disabled) {
+		filter: brightness(1.1);
+	}
+
+	.run-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.dismiss-btn {
