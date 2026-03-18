@@ -20,6 +20,7 @@
 	import { lspClientManager } from '$lib/lsp/LspClientManager';
 	import { contextMenuStore } from '$lib/stores/lsp';
 	import { checkSingleServer } from '$lib/lsp/serverDiscovery';
+	import { getServerConfig } from '$lib/lsp/serverRegistry';
 	import { lspMissingServers, dismissedLspNotifications } from '$lib/stores/lsp';
 	import { settings } from '$lib/stores/settings';
 	import { get } from 'svelte/store';
@@ -341,13 +342,14 @@
 					const alreadyNotified = get(lspMissingServers).some((m) => m.language === lang);
 					if (!alreadyNotified) {
 						checkSingleServer(lang).then((status) => {
-							if (!status.available) {
+							if (!status.found && status.install_hint) {
 								lspMissingServers.update((list) => {
 									if (!list.some((m) => m.language === lang)) {
+										const config = getServerConfig(lang);
 										list.push({
 											language: lang,
-											displayName: status.language,
-											installHint: status.install_hint,
+											displayName: config?.displayName ?? lang,
+											installHint: status.install_hint!,
 										});
 									}
 									return list;

@@ -14,9 +14,10 @@ interface DirEntry {
 
 export interface LspBinaryStatus {
 	language: string;
-	available: boolean;
+	binary: string;
+	found: boolean;
 	path: string | null;
-	install_hint: string;
+	install_hint: string | null;
 }
 
 // ─── Extension → canonical language map ───────────────────────────────────────
@@ -94,7 +95,7 @@ export async function checkProjectOnOpen(root: string): Promise<void> {
 			if (!config) return;
 			try {
 				const status = await checkSingleServer(lang);
-				if (!status.available) {
+				if (!status.found && status.install_hint) {
 					missing.push({
 						language: lang,
 						displayName: config.displayName,

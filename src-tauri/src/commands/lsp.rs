@@ -120,7 +120,7 @@ fn install_hint(language: &str) -> &'static str {
             "npm install -g typescript-language-server typescript"
         }
         "rust" => "rustup component add rust-analyzer",
-        "python" => "pip install pyright",
+        "python" => "npm install -g pyright",
         "go" => "go install golang.org/x/tools/gopls@latest",
         "ruby" => "gem install ruby-lsp",
         "svelte" => "npm install -g svelte-language-server",
