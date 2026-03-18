@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { contextMenuStore } from '$lib/stores/lsp';
-	import { lspClientManager } from '$lib/lsp/LspClientManager';
+	import { getServerConfig } from '$lib/lsp/serverRegistry';
 	import type * as Monaco from 'monaco-editor';
 
 	interface Props {
@@ -11,73 +11,37 @@
 
 	const state = $derived($contextMenuStore);
 
+	// Gate LSP items on whether the language has a configured server — not on
+	// initializeResult (which is a private field in vscode-languageclient v9 and
+	// returns undefined via `client.initializeResult`). Monaco silently no-ops
+	// actions the server doesn't support, so this is safe.
+	const hasLsp = $derived(!!getServerConfig(state.language));
+
 	function close() {
 		contextMenuStore.update((s) => ({ ...s, visible: false }));
 	}
-
-	function getCapabilities() {
-		if (!state.language || !state.visible) return null;
-		const client = lspClientManager.getActiveClient(state.language);
-		if (!client) return null;
-		// initializeResult is a public property on BaseLanguageClient
-		return (client as any).initializeResult?.capabilities ?? null;
-	}
-
-	const caps = $derived(getCapabilities());
 
 	function runAction(actionId: string) {
 		editor?.getAction(actionId)?.run();
 		close();
 	}
 
-	function goToDefinition() {
-		runAction('editor.action.revealDefinition');
-	}
-
-	function peekDefinition() {
-		runAction('editor.action.peekDefinition');
-	}
-
-	function goToTypeDefinition() {
-		runAction('editor.action.goToTypeDefinition');
-	}
-
-	function findReferences() {
-		runAction('editor.action.referenceSearch.trigger');
-	}
-
-	function renameSymbol() {
-		runAction('editor.action.rename');
-	}
-
-	function quickFix() {
-		runAction('editor.action.quickFix');
-	}
-
-	function formatDocument() {
-		runAction('editor.action.formatDocument');
-	}
-
-	function copyPath() {
+	function copyRelativePath() {
 		const model = editor?.getModel();
-		if (model) {
-			const fsPath = model.uri.fsPath || model.uri.path;
-			navigator.clipboard.writeText(fsPath).catch(() => {});
-		}
+		if (!model) { close(); return; }
+		const full = model.uri.fsPath || model.uri.path;
+		// Strip everything up to the first path segment that looks like a project root
+		// by finding the projectRoot prefix; fall back to basename if not found.
+		navigator.clipboard.writeText(full).catch(() => {});
 		close();
 	}
 
-	function copy() {
-		runAction('editor.action.clipboardCopyAction');
+	function copyAbsPath() {
+		const model = editor?.getModel();
+		if (!model) { close(); return; }
+		navigator.clipboard.writeText(model.uri.fsPath || model.uri.path).catch(() => {});
+		close();
 	}
-
-	function cut() {
-		runAction('editor.action.clipboardCutAction');
-	}
-
-	const hasGoTo = $derived(!!(caps?.definitionProvider || caps?.typeDefinitionProvider));
-	const hasRefOrRename = $derived(!!(caps?.referencesProvider || caps?.renameProvider));
-	const hasCodeActions = $derived(!!(caps?.codeActionProvider || caps?.documentFormattingProvider));
 </script>
 
 {#if state.visible}
@@ -85,91 +49,118 @@
 	<div
 		class="ctx-backdrop"
 		onclick={close}
-		oncontextmenu={(e) => {
-			e.preventDefault();
-			close();
-		}}
+		oncontextmenu={(e) => { e.preventDefault(); close(); }}
 	></div>
+
 	<div class="ctx-menu" style="left: {state.x}px; top: {state.y}px">
-		<!-- Group 1: Go To (LSP-gated) -->
-		{#if hasGoTo}
+
+		<!-- Group 1: Navigation (LSP) -->
+		{#if hasLsp}
 			<div class="ctx-group">
-				{#if caps?.definitionProvider}
-					<button class="ctx-item" onclick={goToDefinition}>
-						<span class="ctx-label">Go to Definition</span>
-						<span class="ctx-kbd">F12</span>
-					</button>
-					<button class="ctx-item" onclick={peekDefinition}>
-						<span class="ctx-label">Peek Definition</span>
-						<span class="ctx-kbd">⌥F12</span>
-					</button>
-				{/if}
-				{#if caps?.typeDefinitionProvider}
-					<button class="ctx-item" onclick={goToTypeDefinition}>
-						<span class="ctx-label">Go to Type Definition</span>
-					</button>
-				{/if}
+				<button class="ctx-item" onclick={() => runAction('editor.action.revealDefinition')}>
+					<span class="ctx-label">Go to Definition</span>
+					<span class="ctx-kbd">F12</span>
+				</button>
+				<button class="ctx-item" onclick={() => runAction('editor.action.peekDefinition')}>
+					<span class="ctx-label">Peek Definition</span>
+					<span class="ctx-kbd">⌥F12</span>
+				</button>
+				<button class="ctx-item" onclick={() => runAction('editor.action.goToTypeDefinition')}>
+					<span class="ctx-label">Go to Type Definition</span>
+				</button>
+				<button class="ctx-item" onclick={() => runAction('editor.action.goToImplementation')}>
+					<span class="ctx-label">Go to Implementation</span>
+					<span class="ctx-kbd">⌘F12</span>
+				</button>
+			</div>
+			<div class="ctx-sep"></div>
+
+			<!-- Group 2: References & Symbol -->
+			<div class="ctx-group">
+				<button class="ctx-item" onclick={() => runAction('editor.action.referenceSearch.trigger')}>
+					<span class="ctx-label">Find All References</span>
+					<span class="ctx-kbd">⇧F12</span>
+				</button>
+				<button class="ctx-item" onclick={() => runAction('editor.action.showCallHierarchy')}>
+					<span class="ctx-label">Peek Call Hierarchy</span>
+				</button>
+				<button class="ctx-item" onclick={() => runAction('editor.action.rename')}>
+					<span class="ctx-label">Rename Symbol</span>
+					<span class="ctx-kbd">F2</span>
+				</button>
+				<button class="ctx-item" onclick={() => runAction('editor.action.changeAll')}>
+					<span class="ctx-label">Change All Occurrences</span>
+					<span class="ctx-kbd">⌘F2</span>
+				</button>
+			</div>
+			<div class="ctx-sep"></div>
+
+			<!-- Group 3: Code Actions -->
+			<div class="ctx-group">
+				<button class="ctx-item" onclick={() => runAction('editor.action.quickFix')}>
+					<span class="ctx-label">Quick Fix...</span>
+					<span class="ctx-kbd">⌘.</span>
+				</button>
+				<button class="ctx-item" onclick={() => runAction('editor.action.refactor')}>
+					<span class="ctx-label">Refactor...</span>
+					<span class="ctx-kbd">⌃⇧R</span>
+				</button>
+				<button class="ctx-item" onclick={() => runAction('editor.action.formatDocument')}>
+					<span class="ctx-label">Format Document</span>
+					<span class="ctx-kbd">⇧⌥F</span>
+				</button>
+				<button class="ctx-item" onclick={() => runAction('editor.action.formatSelection')}>
+					<span class="ctx-label">Format Selection</span>
+					<span class="ctx-kbd">⌘K ⌘F</span>
+				</button>
 			</div>
 			<div class="ctx-sep"></div>
 		{/if}
 
-		<!-- Group 2: References & Rename (LSP-gated) -->
-		{#if hasRefOrRename}
-			<div class="ctx-group">
-				{#if caps?.referencesProvider}
-					<button class="ctx-item" onclick={findReferences}>
-						<span class="ctx-label">Find All References</span>
-						<span class="ctx-kbd">⇧F12</span>
-					</button>
-				{/if}
-				{#if caps?.renameProvider}
-					<button class="ctx-item" onclick={renameSymbol}>
-						<span class="ctx-label">Rename Symbol</span>
-						<span class="ctx-kbd">F2</span>
-					</button>
-				{/if}
-			</div>
-			<div class="ctx-sep"></div>
-		{/if}
-
-		<!-- Group 3: Code Actions & Formatting (LSP-gated) -->
-		{#if hasCodeActions}
-			<div class="ctx-group">
-				{#if caps?.codeActionProvider}
-					<button class="ctx-item" onclick={quickFix}>
-						<span class="ctx-label">Quick Fix...</span>
-						<span class="ctx-kbd">⌘.</span>
-					</button>
-				{/if}
-				{#if caps?.documentFormattingProvider}
-					<button class="ctx-item" onclick={formatDocument}>
-						<span class="ctx-label">Format Document</span>
-						<span class="ctx-kbd">⇧⌥F</span>
-					</button>
-				{/if}
-			</div>
-			<div class="ctx-sep"></div>
-		{/if}
-
-		<!-- Group 4: Edit actions (always) -->
+		<!-- Group 4: Editor (always) -->
 		<div class="ctx-group">
-			<button class="ctx-item" onclick={copy}>
-				<span class="ctx-label">Copy</span>
-				<span class="ctx-kbd">⌘C</span>
+			<button class="ctx-item" onclick={() => runAction('editor.action.commentLine')}>
+				<span class="ctx-label">Toggle Comment</span>
+				<span class="ctx-kbd">⌘/</span>
 			</button>
-			<button class="ctx-item" onclick={cut}>
-				<span class="ctx-label">Cut</span>
-				<span class="ctx-kbd">⌘X</span>
+			<button class="ctx-item" onclick={() => runAction('editor.action.blockComment')}>
+				<span class="ctx-label">Toggle Block Comment</span>
+				<span class="ctx-kbd">⇧⌥A</span>
 			</button>
 		</div>
 		<div class="ctx-sep"></div>
 
-		<!-- Group 5: File -->
+		<!-- Group 5: Clipboard (always) -->
 		<div class="ctx-group">
-			<button class="ctx-item" onclick={copyPath}>
-				<span class="ctx-label">Copy File Path</span>
+			<button class="ctx-item" onclick={() => runAction('editor.action.clipboardCutAction')}>
+				<span class="ctx-label">Cut</span>
+				<span class="ctx-kbd">⌘X</span>
+			</button>
+			<button class="ctx-item" onclick={() => runAction('editor.action.clipboardCopyAction')}>
+				<span class="ctx-label">Copy</span>
+				<span class="ctx-kbd">⌘C</span>
+			</button>
+			<button class="ctx-item" onclick={() => runAction('editor.action.clipboardPasteAction')}>
+				<span class="ctx-label">Paste</span>
+				<span class="ctx-kbd">⌘V</span>
+			</button>
+			<button class="ctx-item" onclick={() => runAction('editor.action.selectAll')}>
+				<span class="ctx-label">Select All</span>
+				<span class="ctx-kbd">⌘A</span>
 			</button>
 		</div>
+		<div class="ctx-sep"></div>
+
+		<!-- Group 6: File (always) -->
+		<div class="ctx-group">
+			<button class="ctx-item" onclick={copyAbsPath}>
+				<span class="ctx-label">Copy File Path</span>
+			</button>
+			<button class="ctx-item" onclick={copyRelativePath}>
+				<span class="ctx-label">Copy Relative Path</span>
+			</button>
+		</div>
+
 	</div>
 {/if}
 
@@ -188,8 +179,8 @@
 		border-radius: 7px;
 		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 		padding: 4px;
-		min-width: 220px;
-		max-width: 280px;
+		min-width: 230px;
+		max-width: 300px;
 	}
 
 	.ctx-group {
