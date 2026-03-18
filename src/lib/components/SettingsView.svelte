@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { settings, detectedProviders, updateSettings, refreshProviders } from '$lib/stores/settings';
 	import { showSettings, pendingInstall } from '$lib/stores/layout';
+	import { lspStatuses, lspClientManager } from '$lib/lsp/LspClientManager';
+	import { lspMissingServers, dismissedLspNotifications } from '$lib/stores/lsp';
+	import { checkProjectOnOpen } from '$lib/lsp/serverDiscovery';
+	import { projectRoot } from '$lib/stores/editor';
+	import { supportedLanguages, getServerConfig } from '$lib/lsp/serverRegistry';
 	import { tapp, installedApps, storeListings, storeLoading, availableUpdates, type AppInfo, type AppListing } from '$lib/stores/tapp';
 	import { open } from '@tauri-apps/plugin-dialog';
 	import {
@@ -21,6 +26,7 @@
 		{ id: 'workspace', label: 'Workspace' },
 		{ id: 'agents', label: 'Agents' },
 		{ id: 'apps', label: 'Apps' },
+		{ id: 'language-servers', label: 'Language Servers' },
 	] as const;
 
 	type SectionId = (typeof sections)[number]['id'];
@@ -30,6 +36,36 @@
 	let themeJson = $state('');
 	let jsonError = $state('');
 	let savingTheme = $state(false);
+
+	// Language Servers section state
+	let lspRecheckInProgress = $state(false);
+	let lspRestartingLang = $state<string | null>(null);
+
+	async function restartServer(lang: string) {
+		const root = $projectRoot;
+		if (!root || lspRestartingLang === lang) return;
+		lspRestartingLang = lang;
+		await lspClientManager.stop(lang);
+		await lspClientManager.getOrStart(lang, root).catch(() => {});
+		lspRestartingLang = null;
+	}
+
+	async function recheckServers() {
+		const root = $projectRoot;
+		if (!root || lspRecheckInProgress) return;
+		lspRecheckInProgress = true;
+		dismissedLspNotifications.set(new Set()); // clear dismissed so all recheck
+		lspMissingServers.set([]);
+		await checkProjectOnOpen(root).catch(() => {});
+		lspRecheckInProgress = false;
+	}
+
+	const allLspLanguages = $derived(supportedLanguages().map((lang) => ({
+		lang,
+		config: getServerConfig(lang)!,
+		status: $lspStatuses.get(lang) ?? null,
+		missing: $lspMissingServers.find((m) => m.language === lang) ?? null,
+	})));
 
 	// Apps section state
 	let appsView = $state<'installed' | 'store'>('installed');
@@ -543,14 +579,85 @@
 					{/if}
 				</div>
 			{/if}
+		{:else if activeSection === 'language-servers'}
+			<div class="content-header">
+				<div class="content-title-row">
+					<h1 class="content-title">Language Servers</h1>
+					<button class="refresh-btn" onclick={recheckServers} disabled={lspRecheckInProgress}>
+						{lspRecheckInProgress ? 'Checking...' : 'Recheck'}
+					</button>
+				</div>
+				<p class="content-desc">
+					LSP servers provide completions, diagnostics, go-to-definition, and more. Install any
+					missing servers to enable full IDE features for that language.
+				</p>
+			</div>
+
+			<div class="lsp-format-row">
+				<div class="toggle-info">
+					<span class="toggle-label">Format on save</span>
+					<span class="toggle-desc">Automatically format the file with its language server when you save.</span>
+				</div>
+				<button
+					class="toggle-switch"
+					class:on={$settings.lspFormatOnSave}
+					onclick={() => updateSettings({ lspFormatOnSave: !$settings.lspFormatOnSave })}
+					role="switch"
+					aria-checked={!!$settings.lspFormatOnSave}
+				>
+					<span class="toggle-knob"></span>
+				</button>
+			</div>
+
+			<div class="section-label" style="margin-top: 24px; margin-bottom: 12px;">Installed / Available</div>
+			<div class="lsp-server-list">
+				{#each allLspLanguages as { lang, config, status, missing } (lang)}
+					<div class="lsp-server-row">
+						<div class="lsp-server-info">
+							<div class="lsp-server-header">
+								<span class="lsp-server-name">{config.displayName}</span>
+								{#if status?.state === 'running'}
+									<span class="lsp-badge running">Running</span>
+								{:else if status?.state === 'starting'}
+									<span class="lsp-badge starting">Starting</span>
+								{:else if status?.state === 'error'}
+									<span class="lsp-badge error" title={status.error ?? ''}>Error</span>
+								{:else if status?.state === 'not-installed' || missing}
+									<span class="lsp-badge missing">Not installed</span>
+								{:else}
+									<span class="lsp-badge idle">Idle</span>
+								{/if}
+							</div>
+							{#if status?.state === 'error' && status.error}
+								<code class="lsp-error-detail">{status.error}</code>
+							{/if}
+							{#if missing}
+								<code class="lsp-install-hint">{missing.installHint}</code>
+							{/if}
+						</div>
+						{#if status?.state !== 'not-installed' && !missing}
+							<button
+								class="lsp-restart-btn"
+								onclick={() => restartServer(lang)}
+								disabled={lspRestartingLang === lang || status?.state === 'starting'}
+								title={status?.state === 'running' ? 'Restart server' : status?.state === 'error' ? 'Retry' : 'Start server'}
+							>
+								{lspRestartingLang === lang ? '...' : status?.state === 'running' ? 'Restart' : status?.state === 'error' ? 'Retry' : 'Start'}
+							</button>
+						{/if}
+					</div>
+				{/each}
+			</div>
 		{/if}
 	</main>
 </div>
 
 <style>
 	.settings-page {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
 		display: flex;
-		height: 100%;
 		background: var(--color-base);
 		overflow: hidden;
 	}
@@ -1356,5 +1463,121 @@
 		border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
 		padding: 6px 12px;
 		border-radius: 6px;
+	}
+
+	/* ── Language Servers ── */
+	.lsp-format-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 16px;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 8px;
+		max-width: 560px;
+	}
+
+	.lsp-server-list {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		max-width: 560px;
+	}
+
+	.lsp-server-row {
+		display: flex;
+		align-items: center;
+		padding: 12px 16px;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 8px;
+	}
+
+	.lsp-server-info {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.lsp-server-header {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.lsp-server-name {
+		font-size: 13px;
+		font-weight: 600;
+		color: var(--color-text);
+	}
+
+	.lsp-badge {
+		font-size: 10px;
+		font-weight: 700;
+		padding: 2px 7px;
+		border-radius: 4px;
+	}
+
+	.lsp-badge.running {
+		color: var(--color-success);
+		background: color-mix(in srgb, var(--color-success) 12%, transparent);
+	}
+
+	.lsp-badge.starting {
+		color: var(--color-warning);
+		background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+	}
+
+	.lsp-badge.error {
+		color: var(--color-error);
+		background: color-mix(in srgb, var(--color-error) 12%, transparent);
+	}
+
+	.lsp-badge.missing {
+		color: var(--color-error);
+		background: color-mix(in srgb, var(--color-error) 8%, transparent);
+	}
+
+	.lsp-badge.idle {
+		color: var(--color-text-subtle);
+		background: var(--color-overlay);
+	}
+
+	.lsp-error-detail {
+		font-family: 'SF Mono', 'Fira Code', monospace;
+		font-size: 10px;
+		color: var(--color-error);
+		word-break: break-all;
+	}
+
+	.lsp-install-hint {
+		font-family: 'SF Mono', 'Fira Code', monospace;
+		font-size: 10px;
+		color: var(--color-text-subtle);
+	}
+
+	.lsp-restart-btn {
+		flex-shrink: 0;
+		background: var(--color-overlay);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 4px;
+		color: var(--color-text-subtle);
+		font-size: 11px;
+		font-weight: 600;
+		padding: 3px 10px;
+		cursor: pointer;
+		margin-left: 12px;
+	}
+
+	.lsp-restart-btn:hover:not(:disabled) {
+		background: var(--color-surface);
+		color: var(--color-text);
+		border-color: var(--color-border);
+	}
+
+	.lsp-restart-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 </style>

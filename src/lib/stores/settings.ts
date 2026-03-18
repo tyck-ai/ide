@@ -8,6 +8,8 @@ export interface TyckSettings {
 	lastOpenedFolder?: string;
 	workspaceMode: WorkspaceMode;
 	activeTheme: string;
+	lspFormatOnSave?: boolean;
+	lspDismissed?: string[];
 }
 
 export interface ProviderInfo {
@@ -43,6 +45,12 @@ export async function initSettings(): Promise<void> {
 
 		settings.set(s);
 		detectedProviders.set(providers);
+
+		// Restore dismissed LSP notifications so banners don't re-appear after restart
+		if (s.lspDismissed?.length) {
+			const { dismissedLspNotifications } = await import('$lib/stores/lsp');
+			dismissedLspNotifications.set(new Set(s.lspDismissed));
+		}
 	} catch (e) {
 		console.error('Failed to initialize settings:', e);
 	} finally {

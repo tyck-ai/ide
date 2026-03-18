@@ -71,9 +71,10 @@
 	</div>
 
 	<div class="right-section">
-		<button 
-			class="action-btn" 
-			onclick={onFetch} 
+		<div class="right-divider"></div>
+		<button
+			class="action-btn"
+			onclick={onFetch}
 			title="Fetch remote updates"
 		>
 			⟳
@@ -129,7 +130,14 @@
 		gap: 4px;
 	}
 
-	.branch-btn {
+	.right-divider {
+		width: 1px;
+		height: 14px;
+		background: var(--color-border-muted);
+		margin: 0 4px;
+	}
+
+.branch-btn {
 		display: flex;
 		align-items: center;
 		gap: 6px;

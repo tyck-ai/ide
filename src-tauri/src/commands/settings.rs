@@ -30,6 +30,10 @@ pub struct TyckSettings {
     pub workspace_mode: String,
     #[serde(default = "default_theme")]
     pub active_theme: String,
+    #[serde(default)]
+    pub lsp_format_on_save: Option<bool>,
+    #[serde(default)]
+    pub lsp_dismissed: Option<Vec<String>>,
 }
 
 fn default_provider() -> String {
@@ -51,6 +55,8 @@ impl Default for TyckSettings {
             last_opened_folder: None,
             workspace_mode: default_workspace_mode(),
             active_theme: default_theme(),
+            lsp_format_on_save: None,
+            lsp_dismissed: None,
         }
     }
 }

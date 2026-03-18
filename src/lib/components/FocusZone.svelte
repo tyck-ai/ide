@@ -4,6 +4,7 @@
 	import { toast } from '$lib/stores/toast';
 	import {
 		activeFile,
+		openFileInEditor,
 		updateFileContent,
 		markFileSaved,
 		activeFilePath,
@@ -17,6 +18,15 @@
 	import { isAgentMode } from '$lib/stores/settings';
 	import { sessionReview, activeReview, type MergeResult } from '$lib/stores/sessionReview';
 	import { setMonacoInstance, activeTheme, generateMonacoTheme, applyTheme } from '$lib/themes';
+	import { lspClientManager } from '$lib/lsp/LspClientManager';
+	import { contextMenuStore } from '$lib/stores/lsp';
+	import { checkSingleServer } from '$lib/lsp/serverDiscovery';
+	import { getServerConfig } from '$lib/lsp/serverRegistry';
+	import { lspMissingServers, dismissedLspNotifications } from '$lib/stores/lsp';
+	import { settings } from '$lib/stores/settings';
+	import { initLspServices, setOpenFileCallback } from '$lib/lsp/initLsp';
+	import { get } from 'svelte/store';
+	import EditorContextMenu from './EditorContextMenu.svelte';
 	import type * as Monaco from 'monaco-editor';
 
 	let editorContainer: HTMLDivElement;
@@ -31,6 +41,8 @@
 	let yoursDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let theirsDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let monaco: typeof Monaco;
+	let editorReady = $state(false);
+	let inlayHintsEnabled = $state(true);
 	let diffInline = $state(false);
 	let mergeView = $state<'result' | 'yours' | 'theirs'>('result');
 	/** Key of the file currently loaded in the diff editor (sessionId:relPath). Prevents re-creation on every store update. */
@@ -79,16 +91,29 @@
 	function getLanguage(filename: string): string {
 		const ext = filename.split('.').pop() ?? '';
 		const map: Record<string, string> = {
-			ts: 'typescript', js: 'javascript', svelte: 'html', rs: 'rust',
+			ts: 'typescript', js: 'javascript', svelte: 'svelte', rs: 'rust',
 			json: 'json', css: 'css', html: 'html', md: 'markdown',
 			toml: 'toml', py: 'python', go: 'go', yaml: 'yaml', yml: 'yaml',
 			sh: 'shell', bash: 'shell', zsh: 'shell',
+			rb: 'ruby', graphql: 'graphql', gql: 'graphql',
+		cs: 'csharp', csx: 'csharp', java: 'java',
+		kt: 'kotlin', kts: 'kotlin', swift: 'swift',
 		};
 		return map[ext] ?? 'plaintext';
 	}
 
 	onMount(async () => {
 		monaco = await import('monaco-editor');
+
+		// Kick off LSP service initialisation in the background — do not await
+		// here so the editor appears immediately. startWorkspaceServers() awaits
+		// initLspServices() before spawning any language server.
+		setOpenFileCallback(async (filePath) => {
+			const name = filePath.split('/').pop() ?? filePath;
+			const content = await invoke<string>('read_file', { path: filePath }).catch(() => '');
+			openFileInEditor(filePath, name, content);
+		});
+		initLspServices().catch((e) => console.error('[lsp] Failed to initialize LSP services:', e));
 
 		// Register Monaco instance for theme system
 		setMonacoInstance(monaco);
@@ -139,6 +164,18 @@
 			wordWrap: 'on',
 			tabSize: 2,
 			scrollbar: { horizontal: 'hidden' },
+			contextmenu: false, // use custom context menu
+		});
+
+		// Custom right-click context menu
+		editor.onContextMenu((e) => {
+			e.event.preventDefault();
+			const file = $activeFile;
+			const lang = file ? getLanguage(file.name) : '';
+			contextMenuStore.set({ visible: true, x: e.event.posx, y: e.event.posy, language: lang });
+		});
+		editor.onMouseDown(() => {
+			contextMenuStore.update((s) => ({ ...s, visible: false }));
 		});
 
 		// Create diff editor eagerly so it's warm when the first diff appears (no creation latency)
@@ -201,10 +238,21 @@
 			});
 		}
 
-		// Save on Ctrl+S / Cmd+S
+		// Save on Ctrl+S / Cmd+S (with optional format-on-save)
 		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
 			const file = $activeFile;
 			if (!file) return;
+
+			// Format before saving if the setting is enabled — Monaco handles gracefully
+			// if no formatter is available (built-in or LSP)
+			if (get(settings).lspFormatOnSave) {
+				try {
+					await editor!.getAction('editor.action.formatDocument')?.run();
+				} catch {
+					// formatting errors are non-fatal
+				}
+			}
+
 			const value = editor!.getValue();
 			try {
 				await invoke('write_file', { path: file.path, content: value });
@@ -221,6 +269,26 @@
 			} catch (e) {
 				toast.error(`Failed to save ${file.name}: ${e}`);
 			}
+		});
+
+		// LSP keyboard shortcuts
+		// Cmd+Shift+F — Format document
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF, async () => {
+			await editor!.getAction('editor.action.formatDocument')?.run();
+		});
+		// Cmd+. — Quick fix
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Period, () => {
+			editor!.getAction('editor.action.quickFix')?.run();
+		});
+		// Cmd+T — Workspace symbols
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyT, () => {
+			editor!.getAction('editor.action.showAllSymbols')?.run();
+		});
+		// Cmd+Alt+I — Toggle inlay hints
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyI, () => {
+			inlayHintsEnabled = !inlayHintsEnabled;
+			editor!.updateOptions({ inlayHints: { enabled: inlayHintsEnabled ? 'on' : 'off' } });
+			toast.info(inlayHintsEnabled ? 'Inlay hints enabled' : 'Inlay hints disabled');
 		});
 
 		// Track content changes (skip programmatic setValue calls)
@@ -242,29 +310,77 @@
 		editor.onDidChangeCursorPosition((e) => {
 			cursorLineStore.set(e.position.lineNumber);
 		});
+
+		// Signal that the editor is ready — the $projectRoot $effect re-runs and
+		// starts workspace servers, and the $activeFile $effect loads any file
+		// that was already open before onMount completed.
+		editorReady = true;
 	});
 
-	// React to file changes
+	// When the workspace changes (user opens a different folder), start servers
+	// for the new workspace. Skips if editor isn't ready yet (onMount handles that).
+	$effect(() => {
+		const root = $projectRoot;
+		if (!editorReady || !root) return;
+		lspClientManager.startWorkspaceServers(root).catch(() => {});
+	});
+
+	// React to file changes — use per-file models with file:// URIs so LSP can
+	// resolve imports, cross-file definitions, and workspace-wide references.
+	// editorReady is $state so this effect re-runs once the editor is created.
 	$effect(() => {
 		const file = $activeFile;
-		if (!editor || !monaco) return;
+		if (!editorReady || !editor || !monaco) return;
+
 		if (file) {
-			const model = editor.getModel();
 			const lang = getLanguage(file.name);
-			if (model) {
-				monaco.editor.setModelLanguage(model, lang);
+			const uri = monaco.Uri.file(file.path);
+
+			// Get existing model for this file or create a new one with its URI
+			let model = monaco.editor.getModel(uri);
+			if (!model) {
+				model = monaco.editor.createModel(file.content, lang, uri);
+			} else {
+				if (model.getLanguageId() !== lang) {
+					monaco.editor.setModelLanguage(model, lang);
+				}
 				if (model.getValue() !== file.content) {
 					settingContent = true;
 					model.setValue(file.content);
 					settingContent = false;
 				}
 			}
+
+			// Swap model on the editor only when it actually changes
+			// (avoids losing cursor position on unrelated store updates)
+			if (editor.getModel() !== model) {
+				editor.setModel(model);
+			}
+
+			// Notify if this file's language server binary is missing (per-file fallback check)
+			const dismissed = get(dismissedLspNotifications);
+			if (!dismissed.has(lang) && !get(lspMissingServers).some((m) => m.language === lang)) {
+				checkSingleServer(lang).then((status) => {
+					if (!status.found && status.install_hint) {
+						lspMissingServers.update((list) => {
+							if (!list.some((m) => m.language === lang)) {
+								const config = getServerConfig(lang);
+								list.push({ language: lang, displayName: config?.displayName ?? lang, installHint: status.install_hint! });
+							}
+							return list;
+						});
+					}
+				}).catch(() => {});
+			}
 		} else {
-			const model = editor.getModel();
-			if (model && model.getValue() !== '') {
-				settingContent = true;
-				model.setValue('');
-				settingContent = false;
+			// No file open — show an empty plaintext model
+			const emptyUri = monaco.Uri.parse('inmemory://tyck/empty');
+			let model = monaco.editor.getModel(emptyUri);
+			if (!model) {
+				model = monaco.editor.createModel('', 'plaintext', emptyUri);
+			}
+			if (editor.getModel() !== model) {
+				editor.setModel(model);
 			}
 		}
 	});
@@ -742,6 +858,9 @@
 
 	onDestroy(() => {
 		if (hideChunkTimer) clearTimeout(hideChunkTimer);
+		// Do NOT stop LSP servers here — FocusZone unmounts when navigating to
+		// Settings/GitView, but the workspace is still open and servers should
+		// keep running. stopAll() is called only on workspace close.
 		editor?.dispose();
 		diffEditor?.dispose();
 		mergeEditor?.dispose();
@@ -814,6 +933,8 @@
 		<div class="editor-container" class:hidden={!$activeFile} bind:this={editorContainer}></div>
 	</div>
 </div>
+
+<EditorContextMenu {editor} />
 
 <style>
 	.focus-zone {

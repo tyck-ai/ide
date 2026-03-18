@@ -6,3 +6,4 @@ pub mod settings;
 pub mod providers;
 pub mod checkpoint;
 pub mod worktree;
+pub mod lsp;
