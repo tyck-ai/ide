@@ -17,6 +17,7 @@
 	import { isAgentMode } from '$lib/stores/settings';
 	import { sessionReview, activeReview, type MergeResult } from '$lib/stores/sessionReview';
 	import { setMonacoInstance, activeTheme, generateMonacoTheme, applyTheme } from '$lib/themes';
+	import { lspClientManager } from '$lib/lsp/LspClientManager';
 	import type * as Monaco from 'monaco-editor';
 
 	let editorContainer: HTMLDivElement;
@@ -79,10 +80,11 @@
 	function getLanguage(filename: string): string {
 		const ext = filename.split('.').pop() ?? '';
 		const map: Record<string, string> = {
-			ts: 'typescript', js: 'javascript', svelte: 'html', rs: 'rust',
+			ts: 'typescript', js: 'javascript', svelte: 'svelte', rs: 'rust',
 			json: 'json', css: 'css', html: 'html', md: 'markdown',
 			toml: 'toml', py: 'python', go: 'go', yaml: 'yaml', yml: 'yaml',
 			sh: 'shell', bash: 'shell', zsh: 'shell',
+			rb: 'ruby', graphql: 'graphql', gql: 'graphql',
 		};
 		return map[ext] ?? 'plaintext';
 	}
@@ -244,27 +246,51 @@
 		});
 	});
 
-	// React to file changes
+	// React to file changes — use per-file models with file:// URIs so LSP can
+	// resolve imports, cross-file definitions, and workspace-wide references.
 	$effect(() => {
 		const file = $activeFile;
 		if (!editor || !monaco) return;
+
 		if (file) {
-			const model = editor.getModel();
 			const lang = getLanguage(file.name);
-			if (model) {
-				monaco.editor.setModelLanguage(model, lang);
+			const uri = monaco.Uri.file(file.path);
+
+			// Get existing model for this file or create a new one with its URI
+			let model = monaco.editor.getModel(uri);
+			if (!model) {
+				model = monaco.editor.createModel(file.content, lang, uri);
+			} else {
+				if (model.getLanguageId() !== lang) {
+					monaco.editor.setModelLanguage(model, lang);
+				}
 				if (model.getValue() !== file.content) {
 					settingContent = true;
 					model.setValue(file.content);
 					settingContent = false;
 				}
 			}
+
+			// Swap model on the editor only when it actually changes
+			// (avoids losing cursor position on unrelated store updates)
+			if (editor.getModel() !== model) {
+				editor.setModel(model);
+			}
+
+			// Start (or reuse) the language server for this file's language
+			const root = $projectRoot;
+			if (root) {
+				lspClientManager.getOrStart(lang, root).catch(() => {});
+			}
 		} else {
-			const model = editor.getModel();
-			if (model && model.getValue() !== '') {
-				settingContent = true;
-				model.setValue('');
-				settingContent = false;
+			// No file open — show an empty plaintext model
+			const emptyUri = monaco.Uri.parse('inmemory://tyck/empty');
+			let model = monaco.editor.getModel(emptyUri);
+			if (!model) {
+				model = monaco.editor.createModel('', 'plaintext', emptyUri);
+			}
+			if (editor.getModel() !== model) {
+				editor.setModel(model);
 			}
 		}
 	});
@@ -742,6 +768,7 @@
 
 	onDestroy(() => {
 		if (hideChunkTimer) clearTimeout(hideChunkTimer);
+		lspClientManager.stopAll().catch(() => {});
 		editor?.dispose();
 		diffEditor?.dispose();
 		mergeEditor?.dispose();

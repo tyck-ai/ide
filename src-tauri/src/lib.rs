@@ -3,7 +3,8 @@ mod mcp;
 mod wasm;
 mod apps;
 
-use commands::{checkpoint, fs, git, settings, terminal, tyck, worktree};
+use commands::{checkpoint, fs, git, lsp, settings, terminal, tyck, worktree};
+use lsp::LspManager;
 use apps::commands as tapp_commands;
 use apps::manager::create_shared_manager;
 use apps::store::AppStore;
@@ -34,6 +35,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(app_manager)
         .manage(app_store)
+        .manage(Arc::new(LspManager::new()))
         .setup(|app| {
             // Start the MCP server so agents can call push_and_create_pr.
             let handle = app.handle().clone();
@@ -187,6 +189,13 @@ pub fn run() {
             worktree::resolve_conflict,
             worktree::cleanup_stale_worktrees,
             worktree::check_git_version,
+            // Language server commands
+            lsp::lsp_start,
+            lsp::lsp_send,
+            lsp::lsp_stop,
+            lsp::lsp_stop_all,
+            lsp::lsp_list,
+            lsp::lsp_check_binary,
             // Tapp extension system commands
             tapp_commands::tapp_list_apps,
             tapp_commands::tapp_install_app,
