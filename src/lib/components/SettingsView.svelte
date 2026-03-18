@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { settings, detectedProviders, updateSettings, refreshProviders } from '$lib/stores/settings';
 	import { showSettings, pendingInstall } from '$lib/stores/layout';
-	import { lspStatuses } from '$lib/lsp/LspClientManager';
+	import { lspStatuses, lspClientManager } from '$lib/lsp/LspClientManager';
 	import { lspMissingServers, dismissedLspNotifications } from '$lib/stores/lsp';
 	import { checkProjectOnOpen } from '$lib/lsp/serverDiscovery';
 	import { projectRoot } from '$lib/stores/editor';
@@ -39,6 +39,16 @@
 
 	// Language Servers section state
 	let lspRecheckInProgress = $state(false);
+	let lspRestartingLang = $state<string | null>(null);
+
+	async function restartServer(lang: string) {
+		const root = $projectRoot;
+		if (!root || lspRestartingLang === lang) return;
+		lspRestartingLang = lang;
+		await lspClientManager.stop(lang);
+		await lspClientManager.getOrStart(lang, root).catch(() => {});
+		lspRestartingLang = null;
+	}
 
 	async function recheckServers() {
 		const root = $projectRoot;
@@ -611,17 +621,30 @@
 								{:else if status?.state === 'starting'}
 									<span class="lsp-badge starting">Starting</span>
 								{:else if status?.state === 'error'}
-									<span class="lsp-badge error">Error</span>
-								{:else if missing}
+									<span class="lsp-badge error" title={status.error ?? ''}>Error</span>
+								{:else if status?.state === 'not-installed' || missing}
 									<span class="lsp-badge missing">Not installed</span>
 								{:else}
 									<span class="lsp-badge idle">Idle</span>
 								{/if}
 							</div>
+							{#if status?.state === 'error' && status.error}
+								<code class="lsp-error-detail">{status.error}</code>
+							{/if}
 							{#if missing}
 								<code class="lsp-install-hint">{missing.installHint}</code>
 							{/if}
 						</div>
+						{#if status?.state !== 'not-installed' && !missing}
+							<button
+								class="lsp-restart-btn"
+								onclick={() => restartServer(lang)}
+								disabled={lspRestartingLang === lang || status?.state === 'starting'}
+								title={status?.state === 'running' ? 'Restart server' : status?.state === 'error' ? 'Retry' : 'Start server'}
+							>
+								{lspRestartingLang === lang ? '...' : status?.state === 'running' ? 'Restart' : status?.state === 'error' ? 'Retry' : 'Start'}
+							</button>
+						{/if}
 					</div>
 				{/each}
 			</div>
@@ -631,8 +654,10 @@
 
 <style>
 	.settings-page {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
 		display: flex;
-		height: 100%;
 		background: var(--color-base);
 		overflow: hidden;
 	}
@@ -1519,9 +1544,40 @@
 		background: var(--color-overlay);
 	}
 
+	.lsp-error-detail {
+		font-family: 'SF Mono', 'Fira Code', monospace;
+		font-size: 10px;
+		color: var(--color-error);
+		word-break: break-all;
+	}
+
 	.lsp-install-hint {
 		font-family: 'SF Mono', 'Fira Code', monospace;
 		font-size: 10px;
 		color: var(--color-text-subtle);
+	}
+
+	.lsp-restart-btn {
+		flex-shrink: 0;
+		background: var(--color-overlay);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 4px;
+		color: var(--color-text-subtle);
+		font-size: 11px;
+		font-weight: 600;
+		padding: 3px 10px;
+		cursor: pointer;
+		margin-left: 12px;
+	}
+
+	.lsp-restart-btn:hover:not(:disabled) {
+		background: var(--color-surface);
+		color: var(--color-text);
+		border-color: var(--color-border);
+	}
+
+	.lsp-restart-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 </style>

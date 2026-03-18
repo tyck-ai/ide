@@ -4,6 +4,7 @@
 	import { toast } from '$lib/stores/toast';
 	import {
 		activeFile,
+		openFileInEditor,
 		updateFileContent,
 		markFileSaved,
 		activeFilePath,
@@ -23,6 +24,7 @@
 	import { getServerConfig } from '$lib/lsp/serverRegistry';
 	import { lspMissingServers, dismissedLspNotifications } from '$lib/stores/lsp';
 	import { settings } from '$lib/stores/settings';
+	import { initLspServices, setOpenFileCallback } from '$lib/lsp/initLsp';
 	import { get } from 'svelte/store';
 	import EditorContextMenu from './EditorContextMenu.svelte';
 	import type * as Monaco from 'monaco-editor';
@@ -39,6 +41,7 @@
 	let yoursDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let theirsDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let monaco: typeof Monaco;
+	let editorReady = $state(false);
 	let inlayHintsEnabled = $state(true);
 	let diffInline = $state(false);
 	let mergeView = $state<'result' | 'yours' | 'theirs'>('result');
@@ -93,12 +96,24 @@
 			toml: 'toml', py: 'python', go: 'go', yaml: 'yaml', yml: 'yaml',
 			sh: 'shell', bash: 'shell', zsh: 'shell',
 			rb: 'ruby', graphql: 'graphql', gql: 'graphql',
+		cs: 'csharp', csx: 'csharp', java: 'java',
+		kt: 'kotlin', kts: 'kotlin', swift: 'swift',
 		};
 		return map[ext] ?? 'plaintext';
 	}
 
 	onMount(async () => {
 		monaco = await import('monaco-editor');
+
+		// Kick off LSP service initialisation in the background — do not await
+		// here so the editor appears immediately. startWorkspaceServers() awaits
+		// initLspServices() before spawning any language server.
+		setOpenFileCallback(async (filePath) => {
+			const name = filePath.split('/').pop() ?? filePath;
+			const content = await invoke<string>('read_file', { path: filePath }).catch(() => '');
+			openFileInEditor(filePath, name, content);
+		});
+		initLspServices().catch((e) => console.error('[lsp] Failed to initialize LSP services:', e));
 
 		// Register Monaco instance for theme system
 		setMonacoInstance(monaco);
@@ -228,17 +243,13 @@
 			const file = $activeFile;
 			if (!file) return;
 
-			// Format before saving if LSP has a formatter and the setting is enabled
+			// Format before saving if the setting is enabled — Monaco handles gracefully
+			// if no formatter is available (built-in or LSP)
 			if (get(settings).lspFormatOnSave) {
-				const lang = getLanguage(file.name);
-				const client = lspClientManager.getActiveClient(lang);
-				const hasFmt = (client as any)?.initializeResult?.capabilities?.documentFormattingProvider;
-				if (hasFmt) {
-					try {
-						await editor!.getAction('editor.action.formatDocument')?.run();
-					} catch {
-						// formatting errors are non-fatal
-					}
+				try {
+					await editor!.getAction('editor.action.formatDocument')?.run();
+				} catch {
+					// formatting errors are non-fatal
 				}
 			}
 
@@ -299,13 +310,27 @@
 		editor.onDidChangeCursorPosition((e) => {
 			cursorLineStore.set(e.position.lineNumber);
 		});
+
+		// Signal that the editor is ready — the $projectRoot $effect re-runs and
+		// starts workspace servers, and the $activeFile $effect loads any file
+		// that was already open before onMount completed.
+		editorReady = true;
+	});
+
+	// When the workspace changes (user opens a different folder), start servers
+	// for the new workspace. Skips if editor isn't ready yet (onMount handles that).
+	$effect(() => {
+		const root = $projectRoot;
+		if (!editorReady || !root) return;
+		lspClientManager.startWorkspaceServers(root).catch(() => {});
 	});
 
 	// React to file changes — use per-file models with file:// URIs so LSP can
 	// resolve imports, cross-file definitions, and workspace-wide references.
+	// editorReady is $state so this effect re-runs once the editor is created.
 	$effect(() => {
 		const file = $activeFile;
-		if (!editor || !monaco) return;
+		if (!editorReady || !editor || !monaco) return;
 
 		if (file) {
 			const lang = getLanguage(file.name);
@@ -332,32 +357,20 @@
 				editor.setModel(model);
 			}
 
-			// Start (or reuse) the language server for this file's language
-			const root = $projectRoot;
-			if (root) {
-				lspClientManager.getOrStart(lang, root).catch(() => {});
-				// Check if the binary is missing and not yet notified
-				const dismissed = get(dismissedLspNotifications);
-				if (!dismissed.has(lang)) {
-					const alreadyNotified = get(lspMissingServers).some((m) => m.language === lang);
-					if (!alreadyNotified) {
-						checkSingleServer(lang).then((status) => {
-							if (!status.found && status.install_hint) {
-								lspMissingServers.update((list) => {
-									if (!list.some((m) => m.language === lang)) {
-										const config = getServerConfig(lang);
-										list.push({
-											language: lang,
-											displayName: config?.displayName ?? lang,
-											installHint: status.install_hint!,
-										});
-									}
-									return list;
-								});
+			// Notify if this file's language server binary is missing (per-file fallback check)
+			const dismissed = get(dismissedLspNotifications);
+			if (!dismissed.has(lang) && !get(lspMissingServers).some((m) => m.language === lang)) {
+				checkSingleServer(lang).then((status) => {
+					if (!status.found && status.install_hint) {
+						lspMissingServers.update((list) => {
+							if (!list.some((m) => m.language === lang)) {
+								const config = getServerConfig(lang);
+								list.push({ language: lang, displayName: config?.displayName ?? lang, installHint: status.install_hint! });
 							}
-						}).catch(() => {});
+							return list;
+						});
 					}
-				}
+				}).catch(() => {});
 			}
 		} else {
 			// No file open — show an empty plaintext model
@@ -845,7 +858,9 @@
 
 	onDestroy(() => {
 		if (hideChunkTimer) clearTimeout(hideChunkTimer);
-		lspClientManager.stopAll().catch(() => {});
+		// Do NOT stop LSP servers here — FocusZone unmounts when navigating to
+		// Settings/GitView, but the workspace is still open and servers should
+		// keep running. stopAll() is called only on workspace close.
 		editor?.dispose();
 		diffEditor?.dispose();
 		mergeEditor?.dispose();

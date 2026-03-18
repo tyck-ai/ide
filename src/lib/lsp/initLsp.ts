@@ -1,7 +1,3 @@
-import { initialize } from '@codingame/monaco-vscode-api/services';
-import getEditorServiceOverride, { type OpenEditor } from '@codingame/monaco-vscode-editor-service-override';
-import getConfigurationServiceOverride from '@codingame/monaco-vscode-configuration-service-override';
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Callback invoked when LSP navigation (go to definition, etc.) opens a new file. */
@@ -9,14 +5,12 @@ export type OpenFileCallback = (filePath: string) => Promise<void>;
 
 // ─── Initialisation ───────────────────────────────────────────────────────────
 
-let initialized = false;
+let initPromise: Promise<void> | null = null;
 let openFileCallback: OpenFileCallback | null = null;
 
 /**
  * Set the callback that handles cross-file navigation triggered by LSP
  * (go to definition, go to type definition, etc.).
- *
- * Must be called before initLspServices() or the editor won't open files.
  */
 export function setOpenFileCallback(cb: OpenFileCallback) {
 	openFileCallback = cb;
@@ -27,21 +21,38 @@ export function setOpenFileCallback(cb: OpenFileCallback) {
  *
  * MUST be called once, before any Monaco editor is created.
  * Safe to call multiple times — subsequent calls are no-ops.
+ *
+ * All @codingame imports are dynamic so they don't land in the static import
+ * graph of Svelte components — that caused a TDZ cycle at module initialisation.
  */
-export async function initLspServices(): Promise<void> {
-	if (initialized) return;
-	initialized = true;
+export function initLspServices(): Promise<void> {
+	if (!initPromise) initPromise = _doInit();
+	return initPromise;
+}
 
-	const openEditor: OpenEditor = async (modelRef, _options, _sideBySide) => {
+async function _doInit(): Promise<void> {
+
+	// Dynamic imports keep @codingame out of the static module graph, preventing
+	// the "Cannot access 'component' before initialization" TDZ error in Svelte 5.
+	//
+	// vscode/localExtensionHost MUST be imported before initialize() is called —
+	// it registers the extension host factory that initialize() waits for.
+	// All four are imported concurrently so they're all registered by the time
+	// we call initialize().
+	const [, { initialize }, { default: getEditorServiceOverride }, { default: getConfigurationServiceOverride }] =
+		await Promise.all([
+			import('vscode/localExtensionHost'),
+			import('@codingame/monaco-vscode-api/services'),
+			import('@codingame/monaco-vscode-editor-service-override'),
+			import('@codingame/monaco-vscode-configuration-service-override'),
+		]);
+
+	const openEditor = async (modelRef: any, _options: any, _sideBySide: any) => {
 		const resource = modelRef.object.textEditorModel?.uri;
 		if (!resource) return undefined;
-
-		// Hand cross-file navigation back to FocusZone via the registered callback
 		if (openFileCallback) {
 			await openFileCallback(resource.fsPath);
 		}
-
-		// Return undefined to let Monaco handle rendering the model it already has
 		return undefined;
 	};
 

@@ -2,30 +2,35 @@ import { MonacoLanguageClient } from 'monaco-languageclient';
 import { CloseAction, ErrorAction, State } from 'vscode-languageclient/browser';
 import { writable, get } from 'svelte/store';
 import { createTauriTransport, type LspTransport } from './TauriTransport';
-import { getServerConfig, normalizeLanguage } from './serverRegistry';
-import { checkSingleServer } from './serverDiscovery';
+import { getServerConfig, normalizeLanguage, supportedLanguages } from './serverRegistry';
+import { checkSingleServer, detectWorkspaceLanguages } from './serverDiscovery';
+import { initLspServices } from './initLsp';
+import { lspMissingServers, dismissedLspNotifications } from '$lib/stores/lsp';
 
 // ─── Status store (read by StatusBar, settings panel, etc.) ──────────────────
 
 export interface LspStatus {
 	language: string;
 	displayName: string;
-	state: 'starting' | 'running' | 'stopped' | 'error';
+	state: 'starting' | 'running' | 'stopped' | 'error' | 'not-installed';
+	error?: string;
 }
 
 export const lspStatuses = writable<Map<string, LspStatus>>(new Map());
 
-function setStatus(language: string, displayName: string, state: LspStatus['state']) {
+function setStatus(language: string, displayName: string, state: LspStatus['state'], error?: string) {
 	lspStatuses.update((map) => {
-		map.set(language, { language, displayName, state });
-		return map;
+		const next = new Map(map);
+		next.set(language, { language, displayName, state, error });
+		return next;
 	});
 }
 
 function removeStatus(language: string) {
 	lspStatuses.update((map) => {
-		map.delete(language);
-		return map;
+		const next = new Map(map);
+		next.delete(language);
+		return next;
 	});
 }
 
@@ -74,8 +79,9 @@ class LspClientManager {
 			}
 			return managed?.client ?? null;
 		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
 			console.error(`[lsp] Failed to start client for '${canonical}':`, e);
-			setStatus(canonical, config.displayName, 'error');
+			setStatus(canonical, config.displayName, 'error', msg);
 			return null;
 		} finally {
 			this.starting.delete(canonical);
@@ -93,7 +99,10 @@ class LspClientManager {
 		// an "error", just not installed. Skip silently so the status stays clear.
 		try {
 			const binaryStatus = await checkSingleServer(language);
-			if (!binaryStatus.found) return null;
+			if (!binaryStatus.found) {
+				setStatus(language, config.displayName, 'not-installed');
+				return null;
+			}
 		} catch {
 			// If the check itself fails, attempt the start anyway
 		}
@@ -104,8 +113,9 @@ class LspClientManager {
 		try {
 			transport = await createTauriTransport(language, workspaceRoot);
 		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
 			console.error(`[lsp] Transport creation failed for '${language}':`, e);
-			setStatus(language, config.displayName, 'error');
+			setStatus(language, config.displayName, 'error', `Transport: ${msg}`);
 			return null;
 		}
 
@@ -125,7 +135,27 @@ class LspClientManager {
 			},
 		});
 
+		let reachedRunning = false;
 		client.onDidChangeState(({ newState }) => {
+			if (newState === State.Running) reachedRunning = true;
+
+			if (newState === State.Stopped && !reachedRunning) {
+				// Server exited before initializing — binary found but not functional
+				// (e.g. a rustup proxy for an uninstalled component). Treat as
+				// not-installed and notify the user.
+				setStatus(language, config.displayName, 'not-installed');
+				const dismissed = get(dismissedLspNotifications);
+				if (!dismissed.has(language)) {
+					lspMissingServers.update((list) => {
+						if (!list.some((m) => m.language === language)) {
+							list.push({ language, displayName: config.displayName, installHint: config.installHint });
+						}
+						return list;
+					});
+				}
+				return;
+			}
+
 			const state: LspStatus['state'] =
 				newState === State.Running
 					? 'running'
@@ -144,7 +174,20 @@ class LspClientManager {
 			}
 		});
 
-		await client.start();
+		try {
+			await client.start();
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			// "command X already exists" happens when multiple servers (e.g. json
+			// and yaml) both register the same command (jumpToSchema). By the time
+			// this error fires, the LSP initialize handshake has already completed
+			// and the client is Running — all real LSP features work fine.
+			if (msg.includes('already exists')) {
+				console.warn(`[lsp:${language}] Non-fatal command conflict: ${msg}`);
+			} else {
+				throw e;
+			}
+		}
 		return { client, transport };
 	}
 
@@ -183,6 +226,22 @@ class LspClientManager {
 	getStatusForLanguage(language: string): LspStatus | null {
 		const canonical = normalizeLanguage(language);
 		return get(lspStatuses).get(canonical) ?? null;
+	}
+
+	/**
+	 * Start language servers for languages detected in the workspace.
+	 * Falls back to all supported languages if the workspace scan fails.
+	 * Safe to call multiple times — getOrStart deduplicates in-flight starts.
+	 */
+	async startWorkspaceServers(workspaceRoot: string): Promise<void> {
+		await initLspServices();
+		// Only start servers for languages actually present in the workspace.
+		// Falls back to all supported languages if the directory scan fails.
+		const detected = await detectWorkspaceLanguages(workspaceRoot).catch(() => null);
+		const langs = detected?.length ? detected : supportedLanguages();
+		await Promise.all(
+			langs.map((lang) => this.getOrStart(lang, workspaceRoot).catch(() => {})),
+		);
 	}
 }
 

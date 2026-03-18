@@ -33,6 +33,7 @@
 	import { startAgentStatusListener } from '$lib/stores/agentStatus';
 	import { startGitPoller, git } from '$lib/stores/git';
 	import { checkProjectOnOpen } from '$lib/lsp/serverDiscovery';
+	import { lspClientManager } from '$lib/lsp/LspClientManager';
 	import { initSettings, updateSettings, settings } from '$lib/stores/settings';
 	import { applyDefaultProvider } from '$lib/stores/agentProvider';
 	import { get } from 'svelte/store';
@@ -107,6 +108,8 @@
 	}
 
 	async function setWorkspace(cwd: string) {
+		// Stop any servers from the previous workspace before switching.
+		lspClientManager.stopAll().catch(() => {});
 		resetWorkspace();
 		projectRoot.set(cwd);
 		startGitPoller(cwd);
@@ -190,10 +193,6 @@
 
 {#if !ready}
 	<!-- Loading -->
-{:else if $showSettings}
-	<div class="app-layout">
-		<SettingsView />
-	</div>
 {:else if $showGitView}
 	<div class="app-layout">
 		<GitView />
@@ -302,6 +301,10 @@
 
 {#if $pendingInstall}
 	<PermissionReview />
+{/if}
+
+{#if ready && $showSettings}
+	<SettingsView />
 {/if}
 
 <ToastContainer />

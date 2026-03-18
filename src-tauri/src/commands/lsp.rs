@@ -110,12 +110,29 @@ fn server_config(language: &str) -> Option<ServerConfig> {
             binary: "elixir-ls",
             args: &[],
         }),
+        "csharp" => Some(ServerConfig {
+            binary: "csharp-ls",
+            args: &[],
+        }),
+        "java" => Some(ServerConfig {
+            binary: "jdtls",
+            args: &[],
+        }),
+        "kotlin" => Some(ServerConfig {
+            binary: "kotlin-language-server",
+            args: &[],
+        }),
+        "swift" => Some(ServerConfig {
+            binary: "sourcekit-lsp",
+            args: &[],
+        }),
         _ => None,
     }
 }
 
-fn install_hint(language: &str) -> &'static str {
-    match language {
+fn install_hint(language: &str) -> String {
+    let os = std::env::consts::OS; // "macos" | "linux" | "windows"
+    let s: &str = match language {
         "typescript" | "javascript" | "typescriptreact" | "javascriptreact" => {
             "npm install -g typescript-language-server typescript"
         }
@@ -131,8 +148,25 @@ fn install_hint(language: &str) -> &'static str {
         "toml" => "cargo install taplo-cli --features lsp",
         "graphql" => "npm install -g graphql-language-service-cli",
         "elixir" => "See https://github.com/elixir-lsp/elixir-ls for installation",
+        "csharp" => "dotnet tool install -g csharp-ls",
+        "java" => match os {
+            "macos" => "brew install jdtls",
+            "linux" => "See https://github.com/eclipse-jdtls/eclipse.jdt.ls for installation",
+            _ => "See https://github.com/eclipse-jdtls/eclipse.jdt.ls for installation",
+        },
+        "kotlin" => match os {
+            "macos" => "brew install kotlin-language-server",
+            "linux" => "brew install kotlin-language-server  # or: see https://github.com/fwcd/kotlin-language-server",
+            _ => "See https://github.com/fwcd/kotlin-language-server for installation",
+        },
+        "swift" => match os {
+            "macos" => "xcode-select --install  # sourcekit-lsp ships with Xcode",
+            "linux" => "See https://www.swift.org/install for installation",
+            _ => "See https://www.swift.org/install for installation",
+        },
         _ => "See the language server documentation for installation instructions",
-    }
+    };
+    s.to_string()
 }
 
 // ─── Binary discovery ────────────────────────────────────────────────────────
@@ -145,10 +179,10 @@ fn find_binary(name: &str) -> Option<String> {
         return Some(resolved);
     }
 
-    // Fall back to scanning PATH directories
+    // Fall back to scanning PATH directories (split_paths is OS-aware: ':' on Unix, ';' on Windows)
     if let Ok(path_var) = std::env::var("PATH") {
-        for dir in path_var.split(':') {
-            let candidate = std::path::Path::new(dir).join(name);
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(name);
             if candidate.exists() {
                 return Some(candidate.to_string_lossy().to_string());
             }
@@ -193,7 +227,13 @@ async fn read_lsp_message(
 
     let mut body = vec![0u8; len];
     reader.read_exact(&mut body).await?;
-    Ok(Some(String::from_utf8_lossy(&body).to_string()))
+    match String::from_utf8(body) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) => {
+            log::warn!("[lsp] Message body contained invalid UTF-8 bytes; using lossy conversion: {e}");
+            Ok(Some(String::from_utf8_lossy(e.as_bytes()).to_string()))
+        }
+    }
 }
 
 /// Write one LSP message to stdin with proper Content-Length framing.
@@ -229,13 +269,34 @@ pub async fn lsp_start(
         .current_dir(&workspace_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("Failed to spawn '{}': {e}", config.binary))?;
 
     let stdin = child.stdin.take().ok_or("Failed to acquire stdin handle")?;
     let stdout = child.stdout.take().ok_or("Failed to acquire stdout handle")?;
+
+    // Log stderr lines — critical for diagnosing server crashes and config errors
+    if let Some(stderr) = child.stderr.take() {
+        let lang_for_log = language.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let trimmed = line.trim_end();
+                        if !trimmed.is_empty() {
+                            log::warn!("[lsp:{}] stderr: {}", lang_for_log, trimmed);
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     let server_id = uuid::Uuid::new_v4().to_string();
     let sid = server_id.clone();
@@ -347,7 +408,7 @@ pub async fn lsp_check_binary(language: String) -> Result<LspBinaryStatus, Strin
     let hint = if found {
         None
     } else {
-        Some(install_hint(&language).to_string())
+        Some(install_hint(&language))
     };
 
     Ok(LspBinaryStatus {

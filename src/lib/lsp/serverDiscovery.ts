@@ -37,18 +37,22 @@ const EXT_TO_LANG: Record<string, string> = {
 	toml: 'toml',
 	graphql: 'graphql', gql: 'graphql',
 	ex: 'elixir', exs: 'elixir',
+	cs: 'csharp', csx: 'csharp',
+	java: 'java',
+	kt: 'kotlin', kts: 'kotlin',
+	swift: 'swift',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Collect unique file extensions from up to 2 levels of a directory tree. */
+/** Collect unique file extensions from up to 4 levels of a directory tree. */
 function collectExtensions(entries: DirEntry[], depth = 0): Set<string> {
 	const exts = new Set<string>();
 	for (const entry of entries) {
 		if (!entry.is_dir) {
 			const dot = entry.name.lastIndexOf('.');
 			if (dot !== -1) exts.add(entry.name.slice(dot + 1).toLowerCase());
-		} else if (depth < 1 && entry.children) {
+		} else if (depth < 3 && entry.children) {
 			for (const ext of collectExtensions(entry.children, depth + 1)) {
 				exts.add(ext);
 			}
@@ -62,6 +66,27 @@ function collectExtensions(entries: DirEntry[], depth = 0): Set<string> {
 /** Check whether the binary for a single language is available. */
 export async function checkSingleServer(language: string): Promise<LspBinaryStatus> {
 	return invoke<LspBinaryStatus>('lsp_check_binary', { language });
+}
+
+/**
+ * Scan the workspace root for source files and return the canonical language
+ * ids detected (e.g. ['typescript', 'python', 'rust']).
+ * Returns an empty array if the root is unreadable.
+ */
+export async function detectWorkspaceLanguages(root: string): Promise<string[]> {
+	let entries: DirEntry[] = [];
+	try {
+		entries = await invoke<DirEntry[]>('read_directory', { path: root });
+	} catch {
+		return [];
+	}
+	const exts = collectExtensions(entries);
+	const languages = new Set<string>();
+	for (const ext of exts) {
+		const lang = EXT_TO_LANG[ext];
+		if (lang) languages.add(lang);
+	}
+	return [...languages];
 }
 
 /**
@@ -118,3 +143,4 @@ export async function checkProjectOnOpen(root: string): Promise<void> {
 		});
 	}
 }
+

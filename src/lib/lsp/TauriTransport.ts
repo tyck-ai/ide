@@ -41,6 +41,8 @@ export class TauriMessageReader extends AbstractMessageReader {
 			this.fireClose();
 		}).then((unlisten) => {
 			this.closeUnlisten = unlisten;
+		}).catch((e) => {
+			console.warn(`[lsp] Failed to register close listener for server ${serverId}:`, e);
 		});
 	}
 

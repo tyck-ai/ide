@@ -6,6 +6,9 @@ export interface ServerConfig {
 	/** Human-readable name shown in status bar / settings UI */
 	displayName: string;
 
+	/** Shell command to install this language server. */
+	installHint: string;
+
 	/**
 	 * Monaco language ids this server handles.
 	 * Used for the LSP document selector AND for lsp_check_binary language key.
@@ -31,6 +34,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── TypeScript / JavaScript ─────────────────────────────────────────────
 	typescript: {
 		displayName: 'TypeScript Language Server',
+		installHint: 'npm install -g typescript-language-server typescript',
 		documentSelector: [
 			{ language: 'typescript' },
 			{ language: 'javascript' },
@@ -50,6 +54,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── Rust ─────────────────────────────────────────────────────────────────
 	rust: {
 		displayName: 'rust-analyzer',
+		installHint: 'rustup component add rust-analyzer',
 		documentSelector: [{ language: 'rust' }],
 		initializationOptions: {
 			checkOnSave: { command: 'clippy' },
@@ -69,6 +74,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── Python ───────────────────────────────────────────────────────────────
 	python: {
 		displayName: 'Pyright',
+		installHint: 'npm install -g pyright',
 		documentSelector: [{ language: 'python' }],
 		settings: {
 			python: {
@@ -88,6 +94,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── Go ───────────────────────────────────────────────────────────────────
 	go: {
 		displayName: 'gopls',
+		installHint: 'go install golang.org/x/tools/gopls@latest',
 		documentSelector: [{ language: 'go' }],
 		settings: {
 			gopls: {
@@ -111,6 +118,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── Ruby ─────────────────────────────────────────────────────────────────
 	ruby: {
 		displayName: 'ruby-lsp',
+		installHint: 'gem install ruby-lsp',
 		documentSelector: [{ language: 'ruby' }],
 		initializationOptions: {
 			enabledFeatures: {
@@ -135,6 +143,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── Svelte ───────────────────────────────────────────────────────────────
 	svelte: {
 		displayName: 'Svelte Language Server',
+		installHint: 'npm install -g svelte-language-server',
 		documentSelector: [{ language: 'svelte' }],
 		initializationOptions: {
 			configuration: {
@@ -146,6 +155,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── CSS / SCSS / Less ────────────────────────────────────────────────────
 	css: {
 		displayName: 'CSS Language Server',
+		installHint: 'npm install -g vscode-langservers-extracted',
 		documentSelector: [
 			{ language: 'css' },
 			{ language: 'scss' },
@@ -161,6 +171,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── HTML ─────────────────────────────────────────────────────────────────
 	html: {
 		displayName: 'HTML Language Server',
+		installHint: 'npm install -g vscode-langservers-extracted',
 		documentSelector: [{ language: 'html' }],
 		settings: {
 			html: {
@@ -173,6 +184,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── JSON ─────────────────────────────────────────────────────────────────
 	json: {
 		displayName: 'JSON Language Server',
+		installHint: 'npm install -g vscode-langservers-extracted',
 		documentSelector: [{ language: 'json' }, { language: 'jsonc' }],
 		initializationOptions: { provideFormatter: true },
 		settings: {
@@ -196,6 +208,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── YAML ─────────────────────────────────────────────────────────────────
 	yaml: {
 		displayName: 'YAML Language Server',
+		installHint: 'npm install -g yaml-language-server',
 		documentSelector: [{ language: 'yaml' }],
 		settings: {
 			yaml: {
@@ -215,6 +228,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── TOML ─────────────────────────────────────────────────────────────────
 	toml: {
 		displayName: 'Taplo TOML',
+		installHint: 'cargo install taplo-cli --features lsp',
 		documentSelector: [{ language: 'toml' }],
 		settings: {
 			evenBetterToml: { schema: { enabled: true, links: true } },
@@ -224,6 +238,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── GraphQL ──────────────────────────────────────────────────────────────
 	graphql: {
 		displayName: 'GraphQL Language Server',
+		installHint: 'npm install -g graphql-language-service-cli',
 		documentSelector: [
 			{ language: 'graphql' },
 			{ pattern: '**/*.graphql' },
@@ -234,6 +249,7 @@ const REGISTRY: Record<string, ServerConfig> = {
 	// ─── Elixir ───────────────────────────────────────────────────────────────
 	elixir: {
 		displayName: 'ElixirLS',
+		installHint: 'See https://github.com/elixir-lsp/elixir-ls for installation',
 		documentSelector: [{ language: 'elixir' }],
 		settings: {
 			elixirLS: {
@@ -242,6 +258,34 @@ const REGISTRY: Record<string, ServerConfig> = {
 				suggestSpecs: true,
 			},
 		},
+	},
+
+	// ─── C# ───────────────────────────────────────────────────────────────────
+	csharp: {
+		displayName: 'C# Language Server (csharp-ls)',
+		installHint: 'dotnet tool install -g csharp-ls',
+		documentSelector: [{ language: 'csharp' }],
+	},
+
+	// ─── Java ─────────────────────────────────────────────────────────────────
+	java: {
+		displayName: 'Eclipse JDT Language Server',
+		installHint: 'See https://github.com/eclipse-jdtls/eclipse.jdt.ls for installation',
+		documentSelector: [{ language: 'java' }],
+	},
+
+	// ─── Kotlin ───────────────────────────────────────────────────────────────
+	kotlin: {
+		displayName: 'Kotlin Language Server',
+		installHint: 'See https://github.com/fwcd/kotlin-language-server for installation',
+		documentSelector: [{ language: 'kotlin' }],
+	},
+
+	// ─── Swift ────────────────────────────────────────────────────────────────
+	swift: {
+		displayName: 'SourceKit-LSP',
+		installHint: 'See https://www.swift.org/install for installation',
+		documentSelector: [{ language: 'swift' }],
 	},
 };
 

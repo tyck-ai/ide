@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { git, totalChanges } from '$lib/stores/git';
 	import { showBranchSwitcher, showGitView, gitViewTab } from '$lib/stores/layout';
-	import { lspStatuses } from '$lib/lsp/LspClientManager';
 
 	let syncing = $state(false);
 	let pushing = $state(false);
@@ -72,18 +71,6 @@
 	</div>
 
 	<div class="right-section">
-		{#each [...$lspStatuses.values()] as status (status.language)}
-			<span
-				class="lsp-indicator"
-				class:lsp-running={status.state === 'running'}
-				class:lsp-starting={status.state === 'starting'}
-				class:lsp-error={status.state === 'error'}
-				title="{status.displayName}: {status.state}"
-			>
-				<span class="lsp-dot"></span>
-				<span class="lsp-lang">{status.language}</span>
-			</span>
-		{/each}
 		<div class="right-divider"></div>
 		<button
 			class="action-btn"
@@ -150,51 +137,7 @@
 		margin: 0 4px;
 	}
 
-	.lsp-indicator {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-		padding: 1px 6px;
-		border-radius: 3px;
-		font-size: 10px;
-		font-weight: 500;
-		color: var(--color-text-subtle);
-		cursor: default;
-		user-select: none;
-	}
-
-	.lsp-dot {
-		width: 5px;
-		height: 5px;
-		border-radius: 50%;
-		background: var(--color-border);
-		flex-shrink: 0;
-	}
-
-	.lsp-indicator.lsp-running .lsp-dot {
-		background: var(--color-success);
-	}
-
-	.lsp-indicator.lsp-starting .lsp-dot {
-		background: var(--color-warning);
-		animation: pulse 1.2s ease-in-out infinite;
-	}
-
-	.lsp-indicator.lsp-error .lsp-dot {
-		background: var(--color-error);
-	}
-
-	.lsp-lang {
-		text-transform: uppercase;
-		letter-spacing: 0.3px;
-	}
-
-	@keyframes pulse {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.3; }
-	}
-
-	.branch-btn {
+.branch-btn {
 		display: flex;
 		align-items: center;
 		gap: 6px;
