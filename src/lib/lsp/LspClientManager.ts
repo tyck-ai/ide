@@ -3,6 +3,7 @@ import { CloseAction, ErrorAction, State } from 'vscode-languageclient/browser';
 import { writable, get } from 'svelte/store';
 import { createTauriTransport, type LspTransport } from './TauriTransport';
 import { getServerConfig, normalizeLanguage } from './serverRegistry';
+import { checkSingleServer } from './serverDiscovery';
 
 // ─── Status store (read by StatusBar, settings panel, etc.) ──────────────────
 
@@ -87,6 +88,15 @@ class LspClientManager {
 	): Promise<ManagedClient | null> {
 		const config = getServerConfig(language);
 		if (!config) return null;
+
+		// Check binary exists before attempting to spawn — a missing binary is not
+		// an "error", just not installed. Skip silently so the status stays clear.
+		try {
+			const binaryStatus = await checkSingleServer(language);
+			if (!binaryStatus.found) return null;
+		} catch {
+			// If the check itself fails, attempt the start anyway
+		}
 
 		setStatus(language, config.displayName, 'starting');
 
