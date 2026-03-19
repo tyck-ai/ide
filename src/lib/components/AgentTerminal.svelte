@@ -3,6 +3,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { activeTheme, getXtermTheme } from '$lib/themes';
+	import { focusAgentTerminal, activeSessionId } from '$lib/stores/activeSession';
 
 	let { sessionId = '' }: { sessionId: string } = $props();
 
@@ -27,7 +28,7 @@
 				id: sessionId,
 				cols: terminal.cols,
 				rows: terminal.rows,
-			});
+			}).catch(() => {});
 		} catch { /* ignore fit errors during transitions */ }
 	}
 
@@ -80,7 +81,7 @@
 
 		// Write terminal input to PTY
 		terminal.onData((data: string) => {
-			invoke('write_terminal', { id: sessionId, data });
+			invoke('write_terminal', { id: sessionId, data }).catch(() => { /* PTY closed */ });
 		});
 
 		// Handle resize with debounce to avoid corruption
@@ -88,7 +89,15 @@
 		resizeObserver.observe(termEl);
 	});
 
+	// Focus this terminal when signalled (only if this is the active session)
+	const unsubFocus = focusAgentTerminal.subscribe(() => {
+		if (terminal && sessionId === $activeSessionId) {
+			terminal.focus();
+		}
+	});
+
 	onDestroy(() => {
+		unsubFocus();
 		if (fitTimeout) clearTimeout(fitTimeout);
 		unlistenOutput?.();
 		unlistenExit?.();

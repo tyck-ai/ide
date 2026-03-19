@@ -46,10 +46,18 @@ pub struct TyckSettings {
     pub lsp_format_on_save: Option<bool>,
     #[serde(default)]
     pub lsp_dismissed: Option<Vec<String>>,
+    #[serde(default)]
+    pub keybindings: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
+    pub auto_save: Option<String>,
+    #[serde(default)]
+    pub auto_save_delay: Option<u32>,
+    #[serde(default)]
+    pub inlay_hints: Option<bool>,
 }
 
 fn default_provider() -> String {
-    String::new()
+    "claude-code".to_string()
 }
 
 fn default_workspace_mode() -> String {
@@ -70,6 +78,10 @@ impl Default for TyckSettings {
             active_theme: default_theme(),
             lsp_format_on_save: None,
             lsp_dismissed: None,
+            keybindings: None,
+            auto_save: None,
+            auto_save_delay: None,
+            inlay_hints: None,
         }
     }
 }

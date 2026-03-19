@@ -8,6 +8,18 @@ export interface OpenFile {
 	modified: boolean;
 }
 
+export interface RecentFile {
+	path: string;
+	name: string;
+}
+
+export const recentFiles = writable<RecentFile[]>([]);
+
+export const cursorColumn = writable<number>(1);
+
+/** Pending navigation action for the Monaco editor (consumed by FocusZone). */
+export const pendingEditorAction = writable<{ type: 'goto-line'; line: number } | null>(null);
+
 export const openFiles = writable<OpenFile[]>([]);
 export const activeFilePath = writable<string | null>(null);
 export const projectRoot = writable<string | null>(null);
@@ -46,6 +58,11 @@ export function openFileInEditor(path: string, name: string, content: string) {
 		return files;
 	});
 	activeFilePath.set(path);
+	// Track in recent files (cap at 20, deduplicate by path, newest first)
+	recentFiles.update(recent => {
+		const filtered = recent.filter(f => f.path !== path);
+		return [{ path, name }, ...filtered].slice(0, 20);
+	});
 }
 
 export function updateFileContent(path: string, content: string) {

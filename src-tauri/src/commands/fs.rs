@@ -223,6 +223,67 @@ pub fn watch_directory(app: AppHandle, path: String, window_label: String) -> Re
 }
 
 #[tauri::command]
+pub fn create_file(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {}", e))?;
+    }
+    std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn create_directory(path: String) -> Result<(), String> {
+    std::fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory: {}", e))
+}
+
+#[tauri::command]
+pub fn rename_path(from: String, to: String) -> Result<(), String> {
+    std::fs::rename(&from, &to).map_err(|e| format!("Failed to rename: {}", e))
+}
+
+#[tauri::command]
+pub fn delete_path(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if p.is_dir() {
+        std::fs::remove_dir_all(&path).map_err(|e| format!("Failed to delete directory: {}", e))
+    } else {
+        std::fs::remove_file(&path).map_err(|e| format!("Failed to delete file: {}", e))
+    }
+}
+
+#[tauri::command]
+pub fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in Finder: {}", e))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path))
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in Explorer: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let parent = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or(path);
+        std::process::Command::new("xdg-open")
+            .arg(&parent)
+            .spawn()
+            .map_err(|e| format!("Failed to open file manager: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn stop_watching(window_label: String) -> Result<(), String> {
     stop_watching_for_window(&window_label);
     Ok(())
