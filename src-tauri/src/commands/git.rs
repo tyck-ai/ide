@@ -107,6 +107,20 @@ pub fn git_has_remote(path: String) -> bool {
 }
 
 #[tauri::command]
+pub fn git_add_remote(path: String, name: String, url: String) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["remote", "add", &name, &url])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[tauri::command]
 pub fn git_push_branch(path: String, branch: String) -> Result<(), String> {
     let output = Command::new("git")
         .args(["push", "--set-upstream", "origin", &branch])
@@ -502,6 +516,7 @@ fn empty_full_status() -> GitFullStatus {
 }
 
 fn get_ahead_behind(path: &str, branch: &str) -> (i32, i32) {
+    // Try tracking upstream first
     let output = Command::new("git")
         .args(["rev-list", "--left-right", "--count", &format!("{}...@{{u}}", branch)])
         .current_dir(path)
@@ -518,6 +533,23 @@ fn get_ahead_behind(path: &str, branch: &str) -> (i32, i32) {
             }
         }
     }
+
+    // No upstream set — count all local commits not present on any remote
+    let fallback = Command::new("git")
+        .args(["rev-list", "HEAD", "--not", "--remotes", "--count"])
+        .current_dir(path)
+        .output();
+
+    if let Ok(output) = fallback {
+        if output.status.success() {
+            let count: i32 = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            return (count, 0);
+        }
+    }
+
     (0, 0)
 }
 

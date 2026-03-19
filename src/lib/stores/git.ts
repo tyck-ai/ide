@@ -107,7 +107,7 @@ const emptyState: GitState = {
 	error: null,
 };
 
-function createGitStore() {
+export function createGitStore() {
 	const { subscribe, set, update } = writable<GitState>({ ...emptyState });
 
 	let pollInterval: ReturnType<typeof setInterval> | null = null;

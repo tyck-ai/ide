@@ -27,11 +27,12 @@
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
 	import { TappContainer } from '$lib/components/tapp';
 	import { projectRoot, resetWorkspace } from '$lib/stores/editor';
-	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab, showSessionSidebar } from '$lib/stores/layout';
+	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab, gitAgentSessionId, showSessionSidebar } from '$lib/stores/layout';
 	import { activeApp, tapp } from '$lib/stores/tapp';
 	import { toggleTerminal, terminalVisible } from '$lib/stores/terminal';
 	import { startAgentStatusListener } from '$lib/stores/agentStatus';
 	import { startGitPoller, git } from '$lib/stores/git';
+	import '$lib/stores/agentGit'; // bootstrap agent git auto-tracking
 	import { checkProjectOnOpen } from '$lib/lsp/serverDiscovery';
 	import { lspClientManager } from '$lib/lsp/LspClientManager';
 	import { initSettings, updateSettings, settings } from '$lib/stores/settings';
@@ -90,10 +91,15 @@
 			e.preventDefault();
 			showBranchSwitcher.set(true);
 		}
-		// Cmd+G - Open GitView Changes tab
+		// Cmd+G - Open GitView (context-aware: agent session in agent mode, changes in dev mode)
 		if ((e.ctrlKey || e.metaKey) && e.key === 'g' && !e.shiftKey) {
 			e.preventDefault();
-			gitViewTab.set('changes');
+			if (get(isAgentMode) && get(activeSessionId)) {
+				gitViewTab.set('agent');
+				gitAgentSessionId.set(get(activeSessionId));
+			} else {
+				gitViewTab.set('changes');
+			}
 			showGitView.set(true);
 		}
 		// Cmd+Shift+A (Mac) / Ctrl+Shift+A (Windows/Linux) - Open App Launcher
@@ -193,10 +199,6 @@
 
 {#if !ready}
 	<!-- Loading -->
-{:else if $showGitView}
-	<div class="app-layout">
-		<GitView />
-	</div>
 {:else if !$projectRoot}
 	<WelcomeView onOpen={openFolder} onOpenRecent={setWorkspace} />
 {:else}
@@ -305,6 +307,10 @@
 
 {#if ready && $showSettings}
 	<SettingsView />
+{/if}
+
+{#if ready && $showGitView}
+	<GitView />
 {/if}
 
 <ToastContainer />

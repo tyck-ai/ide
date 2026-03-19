@@ -6,6 +6,7 @@
 	import { projectRoot, openFileInEditor } from '$lib/stores/editor';
 	import { toast } from '$lib/stores/toast';
 	import { git } from '$lib/stores/git';
+	import AddRemoteModal from './AddRemoteModal.svelte';
 
 	let merging = $state(false);
 	let pushing = $state(false);
@@ -36,7 +37,7 @@
 		return () => { unlisten?.(); };
 	});
 
-	// Check if remote exists
+	// Check if remote exists — button is always shown, but push is blocked with a toast if no remote
 	$effect(() => {
 		if ($projectRoot) {
 			invoke<boolean>('git_has_remote', { path: $projectRoot }).then(v => hasRemote = v).catch(() => hasRemote = false);
@@ -62,6 +63,7 @@
 
 	let showMergeModal = $state(false);
 	let showPrModal = $state(false);
+	let showAddRemoteModal = $state(false);
 	let prTitle = $state('');
 	let prBody = $state('');
 
@@ -107,6 +109,11 @@
 	async function pushAndPr() {
 		const session = $activeSession;
 		if (!session || !$projectRoot || pushing) return;
+		if (!hasRemote) {
+			showPrModal = false;
+			showAddRemoteModal = true;
+			return;
+		}
 		pushing = true;
 		try {
 			// Revert rejected files on the agent branch before pushing
@@ -156,9 +163,6 @@
 		const review = $activeReview;
 		const sid = $activeSessionId;
 		if (!review || !sid) return;
-
-		// Refresh diffs to ensure we have the latest state before navigating
-		await sessionReview.refreshDiffs(sid);
 
 		// Open the file from the worktree so the inline diff auto-triggers in FocusZone
 		const fullPath = review.worktreePath + '/' + path;
@@ -277,11 +281,9 @@
 		{/if}
 
 		<div class="review-actions">
-			{#if hasRemote}
-				<button class="review-btn push" onclick={openPrModal} disabled={pushing || totalPending === 0}>
-					{pushing ? 'Pushing...' : 'Push & PR'}
-				</button>
-			{/if}
+			<button class="review-btn push" onclick={openPrModal} disabled={pushing || totalPending === 0}>
+				{pushing ? 'Pushing...' : 'Push & PR'}
+			</button>
 			<button class="review-btn merge" onclick={() => showMergeModal = true} disabled={merging || totalPending === 0}>
 				{merging ? 'Merging...' : 'Merge to Workspace'}
 			</button>
@@ -307,6 +309,13 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if showAddRemoteModal}
+	<AddRemoteModal
+		onAdded={() => { hasRemote = true; showAddRemoteModal = false; openPrModal(); }}
+		onClose={() => showAddRemoteModal = false}
+	/>
 {/if}
 
 {#if showPrModal}
