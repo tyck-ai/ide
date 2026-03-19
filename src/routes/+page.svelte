@@ -3,6 +3,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
 	import { open } from '@tauri-apps/plugin-dialog';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import AwarenessBar from '$lib/components/AwarenessBar.svelte';
 	import ContextZone from '$lib/components/ContextZone.svelte';
 	import FocusZone from '$lib/components/FocusZone.svelte';
@@ -30,12 +31,12 @@
 	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab, gitAgentSessionId, showSessionSidebar } from '$lib/stores/layout';
 	import { activeApp, tapp } from '$lib/stores/tapp';
 	import { toggleTerminal, terminalVisible } from '$lib/stores/terminal';
-	import { startAgentStatusListener } from '$lib/stores/agentStatus';
+	import { startAgentStatusListener, stopAgentStatusListener } from '$lib/stores/agentStatus';
 	import { startGitPoller, git } from '$lib/stores/git';
 	import '$lib/stores/agentGit'; // bootstrap agent git auto-tracking
 	import { checkProjectOnOpen } from '$lib/lsp/serverDiscovery';
 	import { lspClientManager } from '$lib/lsp/LspClientManager';
-	import { initSettings, updateSettings, settings } from '$lib/stores/settings';
+	import { initSettings, settings } from '$lib/stores/settings';
 	import { applyDefaultProvider } from '$lib/stores/agentProvider';
 	import { get } from 'svelte/store';
 	import { activeThemeId, applyTheme, loadCustomThemes, allThemes, builtinThemes } from '$lib/themes';
@@ -119,9 +120,11 @@
 		resetWorkspace();
 		projectRoot.set(cwd);
 		startGitPoller(cwd);
-		await updateSettings({ lastOpenedFolder: cwd });
 		// Non-blocking: detect project languages and warn about missing servers
 		checkProjectOnOpen(cwd).catch(() => {});
+		// Update window title to reflect the active project.
+		const folderName = cwd.split('/').pop() ?? cwd;
+		getCurrentWindow().setTitle(`${folderName} — tyck`).catch(() => {});
 	}
 
 	async function openFolder() {
@@ -173,24 +176,27 @@
 			console.warn('[startup] Failed to check git version:', e);
 		}
 
-		// Restore last folder silently (don't prompt)
-		const lastFolder = get(settings).lastOpenedFolder;
-		if (lastFolder) {
-			await setWorkspace(lastFolder);
+		// Each window receives its workspace path as a URL query param injected by Tauri.
+		const params = new URLSearchParams(window.location.search);
+		const workspaceParam = params.get('workspace');
+		if (workspaceParam) {
+			await setWorkspace(decodeURIComponent(workspaceParam));
 		}
 
 		startAgentStatusListener();
 		ready = true;
 
-		unlistenFns.push(await listen('open-settings', () => {
-			showSettings.set(true);
-		}));
-		unlistenFns.push(await listen('open-folder', () => {
-			openFolder();
+		const myLabel = getCurrentWindow().label;
+		unlistenFns.push(await listen<string>('open-settings', (event) => {
+			if (event.payload === myLabel) {
+				showSettings.set(true);
+			}
 		}));
 	});
 
 	onDestroy(() => {
+		lspClientManager.stopAll().catch(() => {});
+		stopAgentStatusListener();
 		for (const unlisten of unlistenFns) unlisten();
 	});
 </script>

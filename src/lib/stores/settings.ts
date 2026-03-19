@@ -5,7 +5,6 @@ export type WorkspaceMode = 'dev' | 'agent';
 
 export interface TyckSettings {
 	defaultProvider: string;
-	lastOpenedFolder?: string;
 	workspaceMode: WorkspaceMode;
 	activeTheme: string;
 	lspFormatOnSave?: boolean;

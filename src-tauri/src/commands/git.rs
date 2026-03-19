@@ -7,18 +7,23 @@ use std::time::Duration;
 
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use once_cell::sync::Lazy;
-use tauri::{AppHandle, Emitter};
+use std::collections::HashMap;
+use tauri::{AppHandle, Emitter, Manager};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Git Directory Watcher
 // ─────────────────────────────────────────────────────────────────────────────
 
-static GIT_WATCHER_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> = Lazy::new(|| Mutex::new(None));
+// Maps window_label → stop flag so each window owns its own git watcher.
+static GIT_WATCHER_STOPS: Lazy<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitChangeEvent {
     pub reason: String,
+    /// Target window label — used by the frontend to discard cross-window events.
+    pub window_label: String,
 }
 
 fn is_relevant_git_path(path: &std::path::Path) -> bool {
@@ -183,16 +188,16 @@ pub fn gh_create_pr(path: String, title: String, body: String, base: String, hea
 }
 
 #[tauri::command]
-pub fn watch_git_directory(app: AppHandle, path: String) -> Result<(), String> {
+pub fn watch_git_directory(app: AppHandle, path: String, window_label: String) -> Result<(), String> {
     let git_path = PathBuf::from(&path).join(".git");
     if !git_path.is_dir() {
         return Err("Not a git repository".to_string());
     }
 
-    // Stop any existing git watcher
+    // Stop any existing watcher for this window.
     {
-        let mut guard = GIT_WATCHER_STOP.lock().map_err(|e| e.to_string())?;
-        if let Some(old_stop) = guard.take() {
+        let mut guard = GIT_WATCHER_STOPS.lock().map_err(|e| e.to_string())?;
+        if let Some(old_stop) = guard.remove(&window_label) {
             old_stop.store(true, Ordering::Relaxed);
         }
     }
@@ -200,8 +205,8 @@ pub fn watch_git_directory(app: AppHandle, path: String) -> Result<(), String> {
     let stop = Arc::new(AtomicBool::new(false));
 
     {
-        let mut guard = GIT_WATCHER_STOP.lock().map_err(|e| e.to_string())?;
-        *guard = Some(stop.clone());
+        let mut guard = GIT_WATCHER_STOPS.lock().map_err(|e| e.to_string())?;
+        guard.insert(window_label.clone(), stop.clone());
     }
 
     let app_handle = app.clone();
@@ -214,6 +219,8 @@ pub fn watch_git_directory(app: AppHandle, path: String) -> Result<(), String> {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("Failed to create git watcher: {}", e);
+                // Remove zombie entry so the map doesn't accumulate dead flags.
+                if let Ok(mut g) = GIT_WATCHER_STOPS.lock() { g.remove(&window_label); }
                 return;
             }
         };
@@ -223,6 +230,7 @@ pub fn watch_git_directory(app: AppHandle, path: String) -> Result<(), String> {
             notify::RecursiveMode::Recursive,
         ) {
             eprintln!("Failed to watch .git directory: {}", e);
+            if let Ok(mut g) = GIT_WATCHER_STOPS.lock() { g.remove(&window_label); }
             return;
         }
 
@@ -258,7 +266,9 @@ pub fn watch_git_directory(app: AppHandle, path: String) -> Result<(), String> {
                     }
 
                     if should_emit {
-                        let _ = app_handle.emit("git-change", GitChangeEvent { reason });
+                        if let Some(win) = app_handle.get_webview_window(&window_label) {
+                            let _ = win.emit("git-change", GitChangeEvent { reason, window_label: window_label.clone() });
+                        }
                     }
                 }
                 Ok(Err(err)) => {
@@ -276,12 +286,18 @@ pub fn watch_git_directory(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn stop_git_watching() -> Result<(), String> {
-    let mut guard = GIT_WATCHER_STOP.lock().map_err(|e| e.to_string())?;
-    if let Some(stop) = guard.take() {
-        stop.store(true, Ordering::Relaxed);
-    }
+pub fn stop_git_watching(window_label: String) -> Result<(), String> {
+    stop_git_watching_for_window(&window_label);
     Ok(())
+}
+
+/// Internal cleanup called by lib.rs on window Destroyed — no Result needed.
+pub fn stop_git_watching_for_window(window_label: &str) {
+    if let Ok(mut guard) = GIT_WATCHER_STOPS.lock() {
+        if let Some(stop) = guard.remove(window_label) {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

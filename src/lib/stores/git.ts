@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { projectRoot } from './editor';
 import { toast } from './toast';
 
@@ -555,9 +556,11 @@ export function createGitStore() {
 		await refresh();
 
 		// 1. Watch .git directory for changes (instant updates)
+		const windowLabel = getCurrentWindow().label;
 		try {
-			await invoke('watch_git_directory', { path });
-			unlistenGitChange = await listen<{ reason: string }>('git-change', (event) => {
+			await invoke('watch_git_directory', { path, windowLabel });
+			unlistenGitChange = await listen<{ reason: string; windowLabel: string }>('git-change', (event) => {
+				if (event.payload.windowLabel !== windowLabel) return;
 				console.log('[git] Change detected:', event.payload.reason);
 				refresh();
 				// Also refresh related data based on what changed
@@ -573,7 +576,8 @@ export function createGitStore() {
 		}
 
 		// 2. Listen to general filesystem changes (catches file saves)
-		unlistenFsChange = await listen('fs-change', () => {
+		unlistenFsChange = await listen<{ windowLabel: string }>('fs-change', (event) => {
+			if (event.payload.windowLabel !== windowLabel) return;
 			// Debounce: only refresh if not already loading
 			const state = get({ subscribe });
 			if (!state.loading) {
@@ -612,7 +616,7 @@ export function createGitStore() {
 			window.removeEventListener('focus', handleWindowFocus);
 		}
 		try {
-			await invoke('stop_git_watching');
+			await invoke('stop_git_watching', { windowLabel: getCurrentWindow().label });
 		} catch { /* ignore */ }
 	}
 

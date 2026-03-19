@@ -98,6 +98,11 @@ pub async fn spawn_terminal(
                 Err(_) => break,
             }
         }
+        // Process exited — release the PTY master handle so the fd is closed.
+        // Backlog is intentionally kept for replay until explicit kill_terminal.
+        if let Ok(mut handles) = PTY_HANDLES.lock() {
+            handles.remove(&tid);
+        }
         let _ = app_clone.emit(&format!("pty-exit-{}", tid), ());
     });
 

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use once_cell::sync::Lazy;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Serialize, Clone)]
 pub struct DirEntry {
@@ -89,8 +89,9 @@ pub fn write_file(path: String, content: String) -> Result<(), String> {
 
 // ── File system watcher ──
 
-/// Holds the stop flag for the active watcher so we can tear it down on folder switch.
-static WATCHER_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> = Lazy::new(|| Mutex::new(None));
+// Maps window_label → stop flag so each window owns its own file watcher.
+static WATCHER_STOPS: Lazy<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Paths we should ignore change events from.
 fn should_ignore_event(path: &Path) -> bool {
@@ -110,19 +111,21 @@ pub struct FsChangeEvent {
     pub path: String,
     /// The nearest parent directory (for targeted refresh).
     pub parent: String,
+    /// Target window label — used by the frontend to discard cross-window events.
+    pub window_label: String,
 }
 
 #[tauri::command]
-pub fn watch_directory(app: AppHandle, path: String) -> Result<(), String> {
+pub fn watch_directory(app: AppHandle, path: String, window_label: String) -> Result<(), String> {
     let watch_path = PathBuf::from(&path);
     if !watch_path.is_dir() {
         return Err(format!("Not a directory: {}", path));
     }
 
-    // Stop any existing watcher
+    // Stop any existing watcher for this window.
     {
-        let mut guard = WATCHER_STOP.lock().map_err(|e| e.to_string())?;
-        if let Some(old_stop) = guard.take() {
+        let mut guard = WATCHER_STOPS.lock().map_err(|e| e.to_string())?;
+        if let Some(old_stop) = guard.remove(&window_label) {
             old_stop.store(true, Ordering::Relaxed);
         }
     }
@@ -130,8 +133,8 @@ pub fn watch_directory(app: AppHandle, path: String) -> Result<(), String> {
     let stop = Arc::new(AtomicBool::new(false));
 
     {
-        let mut guard = WATCHER_STOP.lock().map_err(|e| e.to_string())?;
-        *guard = Some(stop.clone());
+        let mut guard = WATCHER_STOPS.lock().map_err(|e| e.to_string())?;
+        guard.insert(window_label.clone(), stop.clone());
     }
 
     let root = watch_path.clone();
@@ -146,6 +149,8 @@ pub fn watch_directory(app: AppHandle, path: String) -> Result<(), String> {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("Failed to create file watcher: {}", e);
+                // Remove zombie entry so the map doesn't accumulate dead flags.
+                if let Ok(mut g) = WATCHER_STOPS.lock() { g.remove(&window_label); }
                 return;
             }
         };
@@ -155,6 +160,7 @@ pub fn watch_directory(app: AppHandle, path: String) -> Result<(), String> {
             notify::RecursiveMode::Recursive,
         ) {
             eprintln!("Failed to watch directory: {}", e);
+            if let Ok(mut g) = WATCHER_STOPS.lock() { g.remove(&window_label); }
             return;
         }
 
@@ -190,11 +196,14 @@ pub fn watch_directory(app: AppHandle, path: String) -> Result<(), String> {
                         seen.entry(parent.clone()).or_insert_with(|| FsChangeEvent {
                             path: path_str,
                             parent,
+                            window_label: window_label.clone(),
                         });
                     }
 
-                    for (_key, evt) in seen {
-                        let _ = app_handle.emit("fs-change", evt);
+                    if let Some(win) = app_handle.get_webview_window(&window_label) {
+                        for (_key, evt) in seen {
+                            let _ = win.emit("fs-change", evt);
+                        }
                     }
                 }
                 Ok(Err(err)) => {
@@ -214,10 +223,16 @@ pub fn watch_directory(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn stop_watching() -> Result<(), String> {
-    let mut guard = WATCHER_STOP.lock().map_err(|e| e.to_string())?;
-    if let Some(stop) = guard.take() {
-        stop.store(true, Ordering::Relaxed);
-    }
+pub fn stop_watching(window_label: String) -> Result<(), String> {
+    stop_watching_for_window(&window_label);
     Ok(())
+}
+
+/// Internal cleanup called by lib.rs on window Destroyed — no Result needed.
+pub fn stop_watching_for_window(window_label: &str) {
+    if let Ok(mut guard) = WATCHER_STOPS.lock() {
+        if let Some(stop) = guard.remove(window_label) {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
 }

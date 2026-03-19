@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { activeSessionId } from './activeSession';
 import { openFiles, updateFileContent } from './editor';
 import { isAgentMode } from './settings';
@@ -91,9 +92,14 @@ function createSessionReviewStore() {
 			return next;
 		});
 
-		// Listen for fs-change events — fires immediately when agent writes a file
+		// Listen for fs-change events — fires immediately when agent writes a file.
+		// Filter by window label: Tauri v2 listen() is global across all windows.
 		try {
-			const unlisten = await listen('fs-change', () => refreshDiffs(sessionId));
+			const myLabel = getCurrentWindow().label;
+			const unlisten = await listen<{ windowLabel: string }>('fs-change', (event) => {
+				if (event.payload.windowLabel !== myLabel) return;
+				refreshDiffs(sessionId);
+			});
 			fsUnlistens.set(sessionId, unlisten);
 		} catch { /* non-critical */ }
 
