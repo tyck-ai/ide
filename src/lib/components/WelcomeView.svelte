@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { settings } from '$lib/stores/settings';
-
 	interface Props {
 		onOpen: () => void;
 		onOpenRecent: (path: string) => void;
@@ -10,7 +8,8 @@
 	let { onOpen, onOpenRecent }: Props = $props();
 
 	let mounted = $state(false);
-	let recentFolder = $derived($settings.lastOpenedFolder);
+	// Multi-window mode tracks openWindows in Rust only; no single "last folder" hint.
+	const recentFolder: string | undefined = undefined;
 	let canvas: HTMLCanvasElement;
 	let animFrame: number;
 

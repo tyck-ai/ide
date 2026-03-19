@@ -70,6 +70,7 @@ export function recordStatus(watcherId: string, status: AgentStatus) {
 }
 
 let listening = false;
+let unlistenAgentStatus: (() => void) | null = null;
 
 export function startAgentStatusListener() {
 	if (listening) return;
@@ -78,5 +79,18 @@ export function startAgentStatusListener() {
 	listen<{ watcherId: string; status: AgentStatus }>('agent-status', (event) => {
 		const { watcherId, status } = event.payload;
 		recordStatus(watcherId, status);
+	}).then(fn => {
+		// If stop was called before the promise resolved, unlisten immediately.
+		if (listening) {
+			unlistenAgentStatus = fn;
+		} else {
+			fn();
+		}
 	});
+}
+
+export function stopAgentStatusListener() {
+	unlistenAgentStatus?.();
+	unlistenAgentStatus = null;
+	listening = false;
 }

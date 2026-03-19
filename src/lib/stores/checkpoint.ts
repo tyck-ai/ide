@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 export interface FileDiff {
 	path: string;
@@ -85,9 +86,14 @@ function createCheckpointStore() {
 			console.warn('[checkpoint] create_checkpoint failed (will use HEAD fallback):', e);
 		}
 
-		// Start fs-change listener for live polling
+		// Start fs-change listener for live polling.
+		// Filter by window label: Tauri v2 listen() is global across all windows.
 		try {
-			const unlisten = await listen('fs-change', () => refreshDiffs());
+			const myLabel = getCurrentWindow().label;
+			const unlisten = await listen<{ windowLabel: string }>('fs-change', (event) => {
+				if (event.payload.windowLabel !== myLabel) return;
+				refreshDiffs();
+			});
 			fsUnlisten = unlisten;
 		} catch { /* non-critical */ }
 

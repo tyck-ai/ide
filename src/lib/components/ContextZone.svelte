@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { openFileInEditor, projectRoot, activeWorkingDirectory } from '$lib/stores/editor';
 	import { activeReview } from '$lib/stores/sessionReview';
 	import { isAgentMode } from '$lib/stores/settings';
@@ -23,6 +24,7 @@
 	interface FsChangeEvent {
 		path: string;
 		parent: string;
+		windowLabel: string;
 	}
 
 	let tree: DirEntry[] = $state([]);
@@ -65,12 +67,13 @@
 		await stopWatching();
 
 		try {
-			await invoke('watch_directory', { path });
+			await invoke('watch_directory', { path, windowLabel: getCurrentWindow().label });
 		} catch (e) {
 			console.warn('watch_directory failed:', e);
 		}
 
-		unlisten = await listen<FsChangeEvent>('fs-change', () => {
+		unlisten = await listen<FsChangeEvent>('fs-change', (event) => {
+			if (event.payload.windowLabel !== getCurrentWindow().label) return;
 			// Reload the full tree on any filesystem change
 			if (rootPath) loadTree(rootPath);
 		});
@@ -82,7 +85,7 @@
 			unlisten = null;
 		}
 		try {
-			await invoke('stop_watching');
+			await invoke('stop_watching', { windowLabel: getCurrentWindow().label });
 		} catch { /* ignore */ }
 	}
 

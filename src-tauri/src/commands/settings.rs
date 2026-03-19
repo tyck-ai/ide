@@ -1,8 +1,16 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use super::terminal::resolve_binary;
+
+// In-memory cache of open workspace paths — populated on first load,
+// kept in sync by add/remove helpers. Lets save_settings avoid a disk read.
+static OPEN_WINDOWS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+// Full settings cache — eliminates the disk read inside persist_open_windows.
+static SETTINGS_CACHE: Mutex<Option<TyckSettings>> = Mutex::new(None);
 
 fn tyck_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
@@ -24,8 +32,12 @@ fn themes_dir() -> PathBuf {
 pub struct TyckSettings {
     #[serde(default = "default_provider")]
     pub default_provider: String,
-    #[serde(default)]
+    /// Previously `lastOpenedFolder` — kept for migration reads only; never written.
+    #[serde(default, skip_serializing)]
     pub last_opened_folder: Option<String>,
+    /// Workspace paths for all currently open windows. Managed by Rust only.
+    #[serde(default)]
+    pub open_windows: Vec<String>,
     #[serde(default = "default_workspace_mode")]
     pub workspace_mode: String,
     #[serde(default = "default_theme")]
@@ -53,6 +65,7 @@ impl Default for TyckSettings {
         Self {
             default_provider: default_provider(),
             last_opened_folder: None,
+            open_windows: Vec::new(),
             workspace_mode: default_workspace_mode(),
             active_theme: default_theme(),
             lsp_format_on_save: None,
@@ -115,46 +128,104 @@ pub fn detect_providers() -> Vec<ProviderInfo> {
 
 // ── Settings CRUD ──
 
-#[tauri::command]
-pub fn load_settings() -> TyckSettings {
+pub fn load_settings_inner() -> TyckSettings {
     let path = settings_path();
-    if path.exists() {
-        let content = std::fs::read_to_string(&path).unwrap_or_default();
-        // Migrate old reviewEnabled → workspaceMode
-        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
-            if json.get("reviewEnabled").is_some() && json.get("workspaceMode").is_none() {
-                let mode = if json["reviewEnabled"].as_bool().unwrap_or(false) {
-                    "agent"
-                } else {
-                    "dev"
-                };
-                json["workspaceMode"] = serde_json::Value::String(mode.to_string());
-                if let Some(obj) = json.as_object_mut() {
-                    obj.remove("reviewEnabled");
-                }
-                // Save migrated settings
-                if let Ok(migrated) = serde_json::to_string_pretty(&json) {
-                    let _ = std::fs::write(&path, migrated);
-                }
-            }
-            serde_json::from_value(json).unwrap_or_default()
-        } else {
-            TyckSettings::default()
-        }
-    } else {
-        TyckSettings::default()
+    if !path.exists() {
+        return TyckSettings::default();
     }
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return TyckSettings::default();
+    };
+
+    // Migrate reviewEnabled → workspaceMode.
+    if json.get("reviewEnabled").is_some() && json.get("workspaceMode").is_none() {
+        let mode = if json["reviewEnabled"].as_bool().unwrap_or(false) { "agent" } else { "dev" };
+        json["workspaceMode"] = serde_json::Value::String(mode.to_string());
+        if let Some(obj) = json.as_object_mut() {
+            obj.remove("reviewEnabled");
+        }
+        if let Ok(migrated) = serde_json::to_string_pretty(&json) {
+            let _ = std::fs::write(&path, migrated);
+        }
+    }
+
+    let mut s: TyckSettings = serde_json::from_value(json).unwrap_or_default();
+
+    // Migrate lastOpenedFolder → open_windows (one-time).
+    if s.open_windows.is_empty() {
+        if let Some(folder) = s.last_opened_folder.take() {
+            s.open_windows.push(folder);
+        }
+    }
+
+    // Populate caches so subsequent writes never need a disk read.
+    *OPEN_WINDOWS.lock().unwrap() = s.open_windows.clone();
+    *SETTINGS_CACHE.lock().unwrap() = Some(s.clone());
+
+    s
 }
 
-#[tauri::command]
-pub fn save_settings(settings: TyckSettings) -> Result<(), String> {
+fn save_settings_inner(settings: &TyckSettings) -> Result<(), String> {
     let path = settings_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
-    Ok(())
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Add a workspace path to the persisted open-windows list.
+pub fn add_open_window(path: &str) {
+    let mut cache = OPEN_WINDOWS.lock().unwrap();
+    if !cache.iter().any(|w| w == path) {
+        cache.push(path.to_string());
+        let windows = cache.clone();
+        drop(cache);
+        persist_open_windows(&windows);
+    }
+}
+
+/// Remove a workspace path from the persisted open-windows list.
+pub fn remove_open_window(path: &str) {
+    let mut cache = OPEN_WINDOWS.lock().unwrap();
+    let before = cache.len();
+    cache.retain(|w| w != path);
+    if cache.len() != before {
+        let windows = cache.clone();
+        drop(cache);
+        persist_open_windows(&windows);
+    }
+}
+
+/// Write open_windows into the settings file without touching user preferences.
+fn persist_open_windows(windows: &[String]) {
+    let mut cache = SETTINGS_CACHE.lock().unwrap();
+    if let Some(ref mut s) = *cache {
+        s.open_windows = windows.to_vec();
+        let _ = save_settings_inner(s);
+    } else {
+        // Cache not yet populated (startup race) — fall back to disk read.
+        drop(cache);
+        let mut s = load_settings_inner();
+        s.open_windows = windows.to_vec();
+        let _ = save_settings_inner(&s);
+    }
+}
+
+#[tauri::command]
+pub fn load_settings() -> TyckSettings {
+    load_settings_inner()
+}
+
+#[tauri::command]
+pub fn save_settings(settings: TyckSettings) -> Result<(), String> {
+    // Preserve open_windows from the in-memory cache — no disk read needed.
+    let open_windows = OPEN_WINDOWS.lock().unwrap().clone();
+    let to_save = TyckSettings { open_windows, ..settings };
+    // Keep full settings cache in sync.
+    *SETTINGS_CACHE.lock().unwrap() = Some(to_save.clone());
+    save_settings_inner(&to_save)
 }
 
 // ── Custom Themes CRUD ──

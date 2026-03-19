@@ -139,12 +139,15 @@ async fn message_handler(
             "result": result,
         });
 
-        let sessions = state.sessions.lock().await;
+        let mut sessions = state.sessions.lock().await;
         if let Some(tx) = sessions.get(&session_id) {
             let event = Event::default()
                 .event("message")
                 .data(response.to_string());
-            let _ = tx.send(event).await;
+            // If send fails the SSE client has disconnected — remove dead entry.
+            if tx.send(event).await.is_err() {
+                sessions.remove(&session_id);
+            }
         }
     }
 

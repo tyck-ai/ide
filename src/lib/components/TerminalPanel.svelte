@@ -9,6 +9,7 @@
 		addTerminal,
 		removeTerminal,
 	} from '$lib/stores/terminal';
+	import { get } from 'svelte/store';
 	import { projectRoot } from '$lib/stores/editor';
 
 	let panelHeight = $state(250);
@@ -59,6 +60,10 @@
 
 	onDestroy(() => {
 		dragCleanup?.();
+		// Kill all open PTY processes so Rust doesn't keep their handles/backlogs alive.
+		for (const session of get(terminalSessions)) {
+			invoke('kill_terminal', { id: session.id }).catch(() => {});
+		}
 	});
 
 	// Auto-create first terminal if none exist when panel becomes visible

@@ -8,10 +8,64 @@ use lsp::LspManager;
 use apps::commands as tapp_commands;
 use apps::manager::create_shared_manager;
 use apps::store::AppStore;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use tokio::sync::RwLock;
+use once_cell::sync::Lazy;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
+
+static WINDOW_COUNTER: AtomicU32 = AtomicU32::new(1);
+
+// Maps window label → workspace path so we can remove entries when a window closes.
+static WINDOW_PATHS: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+// Last window to receive focus — set on Focused(true), never cleared on blur,
+// so it survives the brief focus loss that happens when the menu bar is clicked.
+static LAST_FOCUSED: Mutex<Option<String>> = Mutex::new(None);
+
+fn window_paths() -> std::sync::MutexGuard<'static, HashMap<String, String>> {
+    WINDOW_PATHS.lock().unwrap()
+}
+
+fn open_workspace_window(app: &tauri::AppHandle, path: Option<String>) {
+    let id = WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let label = format!("workspace-{}", id);
+
+    // Track label → path so on_window_event can find it on close.
+    if let Some(ref p) = path {
+        window_paths().insert(label.clone(), p.clone());
+        settings::add_open_window(p);
+    }
+
+    let url = match &path {
+        Some(p) => {
+            // Percent-encode the path for use as a query param value.
+            // Encode UTF-8 bytes (not code points) so multi-byte chars are correct.
+            let encoded: String = p.bytes().flat_map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                    vec![b as char]
+                }
+                b => format!("%{:02X}", b).chars().collect(),
+            }).collect();
+            format!("/?workspace={}", encoded)
+        }
+        None => "/".to_string(),
+    };
+
+    let title = path.as_deref()
+        .and_then(|p| std::path::Path::new(p).file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("tyck");
+
+    let _ = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App(url.into()))
+        .title(title)
+        .inner_size(1400.0, 900.0)
+        .resizable(true)
+        .decorations(true)
+        .build();
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -64,7 +118,13 @@ pub fn run() {
                 .item(&PredefinedMenuItem::quit(app, Some("Quit tyck"))?)
                 .build()?;
 
+            let new_window_item = MenuItemBuilder::new("New Window")
+                .accelerator("CmdOrCtrl+Shift+N")
+                .id("new-window")
+                .build(app)?;
+
             let file_menu = SubmenuBuilder::new(app, "File")
+                .item(&new_window_item)
                 .item(&open_folder_item)
                 .build()?;
 
@@ -85,13 +145,75 @@ pub fn run() {
                 .build()?;
 
             app.set_menu(menu)?;
+
+            // Restore previously open workspaces, or open a blank window on first launch.
+            // Filter out stale paths (e.g. unmounted drives) to avoid blank broken windows.
+            let saved = settings::load_settings_inner();
+            let valid: Vec<String> = saved.open_windows.into_iter()
+                .filter(|p| std::path::Path::new(p).exists())
+                .collect();
+            if valid.is_empty() {
+                open_workspace_window(app.handle(), None);
+            } else {
+                for workspace in valid {
+                    open_workspace_window(app.handle(), Some(workspace));
+                }
+            }
+
             Ok(())
         })
         .on_menu_event(|app, event| {
             let id = event.id().0.as_str();
             match id {
-                "settings" => { let _ = app.emit("open-settings", ()); }
-                "open-folder" => { let _ = app.emit("open-folder", ()); }
+                "settings" => {
+                    // Include the target label as payload so each window can
+                    // filter and only open settings if it's the intended target.
+                    // Fall back to the first workspace window if no focus event has fired yet.
+                    let label = LAST_FOCUSED.lock().unwrap().clone().or_else(|| {
+                        app.webview_windows().into_keys()
+                            .find(|k| k.starts_with("workspace-"))
+                    });
+                    if let Some(label) = label {
+                        let _ = app.emit("open-settings", &label);
+                    }
+                }
+                "open-folder" => {
+                    // Pick a folder from Rust and open it in a new window.
+                    // Use a regular thread — blocking_pick_folder is a blocking call
+                    // and must not run on the async executor.
+                    let app = app.clone();
+                    std::thread::spawn(move || {
+                        use tauri_plugin_dialog::DialogExt;
+                        let path = app.dialog().file().blocking_pick_folder();
+                        if let Some(p) = path {
+                            open_workspace_window(&app, Some(p.to_string()));
+                        }
+                    });
+                }
+                "new-window" => {
+                    open_workspace_window(app, None);
+                }
+                _ => {}
+            }
+        })
+        .on_window_event(|window, event| {
+            match event {
+                tauri::WindowEvent::Focused(true) => {
+                    *LAST_FOCUSED.lock().unwrap() = Some(window.label().to_string());
+                }
+                tauri::WindowEvent::Destroyed => {
+                    let label = window.label().to_string();
+                    if let Some(path) = window_paths().remove(&label) {
+                        settings::remove_open_window(&path);
+                    }
+                    // Stop any file/git watchers owned by this window.
+                    fs::stop_watching_for_window(&label);
+                    git::stop_git_watching_for_window(&label);
+                    let mut last = LAST_FOCUSED.lock().unwrap();
+                    if last.as_deref() == Some(&label) {
+                        *last = None;
+                    }
+                }
                 _ => {}
             }
         })
