@@ -8,7 +8,9 @@ export const showInsight = writable(true);
 // Full-page views
 export const showSettings = writable(false);
 export const showGitView = writable(false);
-export const gitViewTab = writable<'changes' | 'history' | 'branches' | 'stashes'>('changes');
+export const gitViewTab = writable<'changes' | 'history' | 'branches' | 'stashes' | 'agent'>('changes');
+/** The agent session currently shown in the AGENT GIT panel. */
+export const gitAgentSessionId = writable<string | null>(null);
 
 // Modals
 export const showBranchSwitcher = writable(false);

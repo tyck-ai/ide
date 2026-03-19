@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { agentModeSessions } from '$lib/stores/agentTerminal';
-	import { peekingMain } from '$lib/stores/editor';
 	import { showSessionSidebar } from '$lib/stores/layout';
 	import NewSessionModal from './NewSessionModal.svelte';
 	import NewMissionModal from './NewMissionModal.svelte';
@@ -37,15 +36,6 @@
 		Sessions {#if $agentModeSessions.length > 0}<span class="session-count">{$agentModeSessions.length}</span>{/if}
 	</button>
 
-	<button
-		class="peek-btn"
-		class:active={$peekingMain}
-		onclick={() => peekingMain.update(v => !v)}
-		title="Peek at main workspace (read-only)"
-	>
-		main ↗
-	</button>
-
 	<div class="bar-spacer"></div>
 
 	{#if $activeMission}
@@ -56,23 +46,23 @@
 
 	<div class="bar-actions">
 		<div class="new-menu-wrapper">
-			<button class="action-btn" onclick={() => showNewMenu = !showNewMenu} title="New session or mission">
-				+
+			<button class="bar-btn" onclick={() => showNewMenu = !showNewMenu} title="New session or mission">
+				+ New Session
 			</button>
 			{#if showNewMenu}
 				<div class="new-menu-backdrop" onclick={() => showNewMenu = false}></div>
 				<div class="new-menu">
 					<button class="new-menu-item" onclick={() => { showNewMenu = false; showNewModal = true; }}>
-						<span class="new-menu-icon">▶</span> New Session
+						New Session
 					</button>
 					<button class="new-menu-item" onclick={() => { showNewMenu = false; showMissionModal = true; }}>
-						<span class="new-menu-icon">🎯</span> New Mission
+						New Mission
 					</button>
 				</div>
 			{/if}
 		</div>
-		<button class="action-btn" onclick={() => showHistory = !showHistory} title="Session history">
-			⏱
+		<button class="bar-btn" onclick={() => showHistory = !showHistory} title="Session history">
+			History
 		</button>
 	</div>
 </div>
@@ -131,24 +121,6 @@
 		font-weight: 700;
 		line-height: 14px;
 	}
-	.peek-btn {
-		background: none;
-		border: none;
-		color: var(--color-text-subtle);
-		font-size: 10px;
-		cursor: pointer;
-		padding: 2px 8px;
-		border-radius: 3px;
-		margin-left: 4px;
-	}
-	.peek-btn:hover {
-		color: var(--color-text);
-		background: var(--color-overlay);
-	}
-	.peek-btn.active {
-		color: var(--color-accent);
-		background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-	}
 	.bar-spacer {
 		flex: 1;
 	}
@@ -168,18 +140,20 @@
 		gap: 2px;
 		flex-shrink: 0;
 	}
-	.action-btn {
+	.bar-btn {
 		background: none;
-		border: none;
+		border: 1px solid var(--color-border-muted);
 		color: var(--color-text-subtle);
-		font-size: 14px;
+		font-size: 10px;
+		font-weight: 500;
 		cursor: pointer;
-		padding: 2px 8px;
+		padding: 3px 10px;
 		border-radius: 4px;
 	}
-	.action-btn:hover {
+	.bar-btn:hover {
 		background: var(--color-overlay);
 		color: var(--color-text);
+		border-color: var(--color-border);
 	}
 	.new-menu-wrapper {
 		position: relative;

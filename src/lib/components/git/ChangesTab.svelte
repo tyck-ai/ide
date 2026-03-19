@@ -3,21 +3,31 @@
 	import { git, type FileStatus } from '$lib/stores/git';
 	import { invoke } from '@tauri-apps/api/core';
 	import { projectRoot } from '$lib/stores/editor';
+	import AddRemoteModal from '$lib/components/AddRemoteModal.svelte';
 
 	let selectedFile = $state<{ path: string; staged: boolean } | null>(null);
 	let originalContent = $state('');
 	let modifiedContent = $state('');
 	let commitMessage = $state('');
 	let committing = $state(false);
+	let pushing = $state(false);
+	let hasRemote = $state(false);
+	let showAddRemoteModal = $state(false);
 	let discardConfirmPath = $state<string | null>(null);
-	let diffEditor: any = null;
+	let diffEditor = $state<any>(null);
 	let editorContainer: HTMLDivElement;
 
-	onMount(() => {
-		const monaco = (window as any).monaco;
-		if (monaco && editorContainer) {
+	$effect(() => {
+		if ($projectRoot) {
+			invoke<boolean>('git_has_remote', { path: $projectRoot }).then(v => hasRemote = v).catch(() => hasRemote = false);
+		}
+	});
+
+	onMount(async () => {
+		const monaco = await import('monaco-editor');
+		if (editorContainer) {
 			diffEditor = monaco.editor.createDiffEditor(editorContainer, {
-				theme: 'vs-dark',
+				theme: 'tyck-theme',
 				readOnly: true,
 				automaticLayout: true,
 				minimap: { enabled: false },
@@ -33,9 +43,15 @@
 		};
 	});
 
-	async function selectFile(path: string, staged: boolean) {
+	// Load diff whenever both selected file and editor are ready
+	$effect(() => {
+		if (selectedFile && diffEditor) {
+			loadDiff(selectedFile.path, selectedFile.staged);
+		}
+	});
+
+	function selectFile(path: string, staged: boolean) {
 		selectedFile = { path, staged };
-		await loadDiff(path, staged);
 	}
 
 	async function loadDiff(path: string, staged: boolean) {
@@ -50,11 +66,14 @@
 			modifiedContent = modified;
 
 			if (diffEditor) {
-				const monaco = (window as any).monaco;
+				const monaco = await import('monaco-editor');
+				const oldModel = diffEditor.getModel();
 				diffEditor.setModel({
 					original: monaco.editor.createModel(original, undefined, monaco.Uri.parse(`original://${path}`)),
 					modified: monaco.editor.createModel(modified, undefined, monaco.Uri.parse(`modified://${path}`)),
 				});
+				oldModel?.original?.dispose();
+				oldModel?.modified?.dispose();
 			}
 		} catch (e) {
 			console.error('Failed to load diff:', e);
@@ -105,10 +124,40 @@
 
 	async function doCommitAndPush() {
 		if (!commitMessage.trim() || committing) return;
+		if (!hasRemote) {
+			// Commit first, then open Add Remote modal so user can push
+			committing = true;
+			const sha = await git.commit(commitMessage.trim());
+			committing = false;
+			if (sha) {
+				commitMessage = '';
+				showAddRemoteModal = true;
+			}
+			return;
+		}
 		committing = true;
 		await git.commitAndPush(commitMessage.trim());
 		committing = false;
 		commitMessage = '';
+	}
+
+	async function doPush() {
+		if (pushing) return;
+		if (!hasRemote) {
+			showAddRemoteModal = true;
+			return;
+		}
+		pushing = true;
+		await git.push();
+		pushing = false;
+	}
+
+	async function onRemoteAdded() {
+		hasRemote = true;
+		showAddRemoteModal = false;
+		pushing = true;
+		await git.push(true);
+		pushing = false;
 	}
 
 	function getStatusIcon(status: string): string {
@@ -237,6 +286,14 @@
 		{/if}
 
 		<div class="commit-section">
+			{#if $git.ahead > 0}
+				<div class="unpushed-bar">
+					<span class="unpushed-label">{$git.ahead} unpushed commit{$git.ahead !== 1 ? 's' : ''}</span>
+					<button class="unpushed-push-btn" onclick={doPush} disabled={pushing}>
+						{pushing ? 'Pushing…' : 'Push'}
+					</button>
+				</div>
+			{/if}
 			<textarea
 				bind:value={commitMessage}
 				placeholder="Commit message..."
@@ -244,14 +301,14 @@
 				rows="3"
 			></textarea>
 			<div class="commit-actions">
-				<button 
+				<button
 					class="commit-btn"
 					onclick={doCommit}
 					disabled={!commitMessage.trim() || $git.staged.length === 0 || committing}
 				>
 					{committing ? 'Committing...' : 'Commit'}
 				</button>
-				<button 
+				<button
 					class="commit-btn push"
 					onclick={doCommitAndPush}
 					disabled={!commitMessage.trim() || $git.staged.length === 0 || committing}
@@ -277,6 +334,10 @@
 	</div>
 </div>
 
+{#if showAddRemoteModal}
+	<AddRemoteModal onAdded={onRemoteAdded} onClose={() => showAddRemoteModal = false} />
+{/if}
+
 {#if discardConfirmPath}
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -295,6 +356,34 @@
 {/if}
 
 <style>
+	.unpushed-bar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 6px 12px;
+		margin-bottom: 8px;
+		background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+		border-radius: 6px;
+		font-size: 12px;
+	}
+	.unpushed-label {
+		color: var(--color-accent);
+		font-weight: 500;
+	}
+	.unpushed-push-btn {
+		background: var(--color-accent);
+		border: none;
+		border-radius: 4px;
+		color: white;
+		font-size: 11px;
+		font-weight: 600;
+		padding: 3px 10px;
+		cursor: pointer;
+	}
+	.unpushed-push-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.unpushed-push-btn:hover:not(:disabled) { filter: brightness(1.1); }
+
 	.discard-overlay {
 		position: fixed;
 		inset: 0;
