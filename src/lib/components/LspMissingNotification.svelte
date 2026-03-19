@@ -4,6 +4,7 @@
 	import { sendCommandToTerminal } from '$lib/stores/terminal';
 	import { updateSettings } from '$lib/stores/settings';
 	import { projectRoot } from '$lib/stores/editor';
+	import { log } from '$lib/log';
 
 	let running = $state<string | null>(null);
 	let retrying = $state<string | null>(null);
@@ -18,7 +19,7 @@
 		dismissedLspNotifications.update((set) => {
 			const next = new Set(set);
 			next.add(language);
-			updateSettings({ lspDismissed: [...next] }).catch(() => {});
+			updateSettings({ lspDismissed: [...next] }).catch((e) => log.warn('[LspMissingNotification] updateSettings', e));
 			return next;
 		});
 	}
@@ -28,7 +29,7 @@
 			dismissedLspNotifications.update((set) => {
 				const next = new Set(set);
 				for (const s of list) next.add(s.language);
-				updateSettings({ lspDismissed: [...next] }).catch(() => {});
+				updateSettings({ lspDismissed: [...next] }).catch((e) => log.warn('[LspMissingNotification] updateSettings', e));
 				return next;
 			});
 			return [];
@@ -47,7 +48,7 @@
 		if (!root || retrying === language) return;
 		retrying = language;
 		await lspClientManager.stop(language);
-		await lspClientManager.getOrStart(language, root).catch(() => {});
+		await lspClientManager.getOrStart(language, root).catch((e) => log.warn('[LspMissingNotification] getOrStart', e));
 		retrying = null;
 	}
 </script>

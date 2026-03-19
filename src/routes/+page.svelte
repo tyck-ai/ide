@@ -22,15 +22,17 @@
 	import LspMissingNotification from '$lib/components/LspMissingNotification.svelte';
 	import SessionBar from '$lib/components/SessionBar.svelte';
 	import SessionSidebar from '$lib/components/SessionSidebar.svelte';
+	import QuickOpenPalette from '$lib/components/QuickOpenPalette.svelte';
 	import { isAgentMode } from '$lib/stores/settings';
 	import { activeSessionId } from '$lib/stores/activeSession';
 	import { agentModeSessions } from '$lib/stores/agentTerminal';
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
 	import { TappContainer } from '$lib/components/tapp';
 	import { projectRoot, resetWorkspace } from '$lib/stores/editor';
-	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab, gitAgentSessionId, showSessionSidebar } from '$lib/stores/layout';
+	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab, gitAgentSessionId, showSessionSidebar, showQuickOpen, quickOpenMode, contextZoneTab, showProblems } from '$lib/stores/layout';
 	import { activeApp, tapp } from '$lib/stores/tapp';
 	import { toggleTerminal, terminalVisible } from '$lib/stores/terminal';
+	import { matchesBinding } from '$lib/stores/keybindings';
 	import { startAgentStatusListener, stopAgentStatusListener } from '$lib/stores/agentStatus';
 	import { startGitPoller, git } from '$lib/stores/git';
 	import '$lib/stores/agentGit'; // bootstrap agent git auto-tracking
@@ -40,6 +42,8 @@
 	import { applyDefaultProvider } from '$lib/stores/agentProvider';
 	import { get } from 'svelte/store';
 	import { activeThemeId, applyTheme, loadCustomThemes, allThemes, builtinThemes } from '$lib/themes';
+	import { log } from '$lib/log';
+	import { initDiagnostics } from '$lib/diagnostics';
 
 	let ready = $state(false);
 	let showAgentWelcomeModal = $state(false);
@@ -79,7 +83,14 @@
 	}
 
 	function onKeydown(e: KeyboardEvent) {
-		if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+		// Cmd+T — toggle terminal (also handled inside Monaco via addCommand)
+		if (matchesBinding(e, 'cmd+t')) {
+			e.preventDefault();
+			toggleTerminal();
+			return;
+		}
+		// Ctrl+` — also toggles terminal
+		if (e.ctrlKey && e.key === '`') {
 			e.preventDefault();
 			toggleTerminal();
 		}
@@ -93,7 +104,10 @@
 			showBranchSwitcher.set(true);
 		}
 		// Cmd+G - Open GitView (context-aware: agent session in agent mode, changes in dev mode)
-		if ((e.ctrlKey || e.metaKey) && e.key === 'g' && !e.shiftKey) {
+		// On macOS: metaKey+g. On Windows/Linux: ctrlKey+g (but NOT bare ctrlKey without meta on macOS)
+		const isMacOs = navigator.platform.toUpperCase().includes('MAC');
+		const gitModifier = isMacOs ? e.metaKey : (e.ctrlKey && !e.metaKey);
+		if (gitModifier && e.key === 'g' && !e.shiftKey) {
 			e.preventDefault();
 			if (get(isAgentMode) && get(activeSessionId)) {
 				gitViewTab.set('agent');
@@ -105,26 +119,57 @@
 		}
 		// Cmd+Shift+A (Mac) / Ctrl+Shift+A (Windows/Linux) - Open App Launcher
 		if (e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-			const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+			const isMac = navigator.platform.toUpperCase().includes('MAC');
 			const modifierPressed = isMac ? e.metaKey : e.ctrlKey;
 			if (modifierPressed) {
 				e.preventDefault();
 				showAppLauncher.set(true);
 			}
 		}
+		// Cmd+P — Quick open (go to file)
+		if ((e.metaKey || e.ctrlKey) && e.key === 'p' && !e.shiftKey) {
+			e.preventDefault();
+			quickOpenMode.set('file');
+			showQuickOpen.set(true);
+		}
+		// Ctrl+G — Go to line (macOS: Ctrl without Meta; Windows/Linux: not used here to avoid conflict with Git)
+		if (e.ctrlKey && !e.metaKey && e.key === 'g' && isMacOs) {
+			e.preventDefault();
+			quickOpenMode.set('line');
+			showQuickOpen.set(true);
+		}
+		// Cmd+Shift+F — Find in files (open search panel)
+		if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'F' || e.key === 'f')) {
+			e.preventDefault();
+			contextZoneTab.set('search');
+			showContext.set(true);
+		}
+		// Cmd+Shift+H — Replace in files (same as search panel but with replace mode)
+		if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
+			e.preventDefault();
+			contextZoneTab.set('search');
+			showContext.set(true);
+		}
+		// Cmd+Shift+M — Toggle Problems panel
+		if (matchesBinding(e, 'cmd+shift+m')) {
+			e.preventDefault();
+			const open = !get(showProblems);
+			showProblems.set(open);
+			if (open) terminalVisible.set(false);
+		}
 	}
 
 	async function setWorkspace(cwd: string) {
 		// Stop any servers from the previous workspace before switching.
-		lspClientManager.stopAll().catch(() => {});
+		lspClientManager.stopAll().catch((e) => log.warn('[setWorkspace] lspClientManager.stopAll', e));
 		resetWorkspace();
 		projectRoot.set(cwd);
 		startGitPoller(cwd);
 		// Non-blocking: detect project languages and warn about missing servers
-		checkProjectOnOpen(cwd).catch(() => {});
+		checkProjectOnOpen(cwd).catch((e) => log.warn('[setWorkspace] checkProjectOnOpen', e));
 		// Update window title to reflect the active project.
 		const folderName = cwd.split('/').pop() ?? cwd;
-		getCurrentWindow().setTitle(`${folderName} — tyck`).catch(() => {});
+		getCurrentWindow().setTitle(`${folderName} — tyck`).catch((e) => log.warn('[setWorkspace] setTitle', e));
 	}
 
 	async function openFolder() {
@@ -143,6 +188,8 @@
 	}
 
 	onMount(async () => {
+		initDiagnostics();
+		log.info('[app] tyck starting');
 		await initSettings();
 		applyDefaultProvider();
 
@@ -195,6 +242,7 @@
 	});
 
 	onDestroy(() => {
+		log.info('[app] tyck window closing');
 		lspClientManager.stopAll().catch(() => {});
 		stopAgentStatusListener();
 		for (const unlisten of unlistenFns) unlisten();
@@ -204,7 +252,9 @@
 <svelte:window onmousemove={onMouseMove} onmouseup={onMouseUp} onkeydown={onKeydown} />
 
 {#if !ready}
-	<!-- Loading -->
+	<div class="startup-loading">
+		<div class="startup-dot"></div>
+	</div>
 {:else if !$projectRoot}
 	<WelcomeView onOpen={openFolder} onOpenRecent={setWorkspace} />
 {:else}
@@ -319,6 +369,7 @@
 	<GitView />
 {/if}
 
+<QuickOpenPalette />
 <ToastContainer />
 <LspMissingNotification />
 
@@ -432,4 +483,24 @@
 		cursor: pointer;
 	}
 	.agent-welcome-btn:hover { filter: brightness(1.1); }
+	.startup-loading {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--color-base);
+	}
+	.startup-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--color-text-subtle);
+		opacity: 0.3;
+		animation: pulse 1s ease-in-out infinite;
+	}
+	@keyframes pulse {
+		0%, 100% { opacity: 0.15; transform: scale(1); }
+		50% { opacity: 0.6; transform: scale(1.4); }
+	}
 </style>

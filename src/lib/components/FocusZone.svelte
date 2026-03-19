@@ -11,21 +11,27 @@
 		projectRoot,
 		selection as selectionStore,
 		cursorLine as cursorLineStore,
+		cursorColumn as cursorColumnStore,
+		pendingEditorAction,
 	} from '$lib/stores/editor';
+	import StatusBar from './StatusBar.svelte';
 	import InlineEditOverlay from './InlineEditOverlay.svelte';
 	import AgentEditBar from './AgentEditBar.svelte';
 	import { activeSessionId, activeSession, trackDevEdit } from '$lib/stores/agentTerminal';
+	import { focusAgentTerminal } from '$lib/stores/activeSession';
+	import { toggleTerminal } from '$lib/stores/terminal';
 	import { isAgentMode } from '$lib/stores/settings';
 	import { sessionReview, activeReview, type MergeResult } from '$lib/stores/sessionReview';
 	import { setMonacoInstance, activeTheme, generateMonacoTheme, applyTheme } from '$lib/themes';
 	import { lspClientManager } from '$lib/lsp/LspClientManager';
-	import { contextMenuStore } from '$lib/stores/lsp';
+	import { contextMenuStore, diagnostics } from '$lib/stores/lsp';
 	import { checkSingleServer } from '$lib/lsp/serverDiscovery';
 	import { getServerConfig } from '$lib/lsp/serverRegistry';
 	import { lspMissingServers, dismissedLspNotifications } from '$lib/stores/lsp';
-	import { settings } from '$lib/stores/settings';
+	import { settings, updateSettings } from '$lib/stores/settings';
 	import { initLspServices, setOpenFileCallback } from '$lib/lsp/initLsp';
 	import { get } from 'svelte/store';
+	import { log } from '$lib/log';
 	import EditorContextMenu from './EditorContextMenu.svelte';
 	import type * as Monaco from 'monaco-editor';
 
@@ -36,13 +42,15 @@
 	let theirsContainer: HTMLDivElement;
 	let editor: Monaco.editor.IStandaloneCodeEditor | undefined;
 	let settingContent = false;
+	let saving = false;
 	let diffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let mergeEditor: Monaco.editor.IStandaloneCodeEditor | undefined;
 	let yoursDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let theirsDiffEditor: Monaco.editor.IStandaloneDiffEditor | undefined;
 	let monaco: typeof Monaco;
 	let editorReady = $state(false);
-	let inlayHintsEnabled = $state(true);
+	let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+	let inlayHintsEnabled = $state(get(settings).inlayHints ?? true);
 	let diffInline = $state(false);
 	let mergeView = $state<'result' | 'yours' | 'theirs'>('result');
 	/** Key of the file currently loaded in the diff editor (sessionId:relPath). Prevents re-creation on every store update. */
@@ -165,6 +173,7 @@
 			tabSize: 2,
 			scrollbar: { horizontal: 'hidden' },
 			contextmenu: false, // use custom context menu
+			inlayHints: { enabled: inlayHintsEnabled ? 'on' : 'off' },
 		});
 
 		// Custom right-click context menu
@@ -240,8 +249,10 @@
 
 		// Save on Ctrl+S / Cmd+S (with optional format-on-save)
 		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
+			if (saving) return;
 			const file = $activeFile;
 			if (!file) return;
+			saving = true;
 
 			// Format before saving if the setting is enabled — Monaco handles gracefully
 			// if no formatter is available (built-in or LSP)
@@ -268,35 +279,47 @@
 				}
 			} catch (e) {
 				toast.error(`Failed to save ${file.name}: ${e}`);
+			} finally {
+				saving = false;
 			}
 		});
 
 		// LSP keyboard shortcuts
-		// Cmd+Shift+F — Format document
-		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF, async () => {
+		// Shift+Alt+F — Format document (Cmd+Shift+F is reserved for Find in Files)
+		editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, async () => {
 			await editor!.getAction('editor.action.formatDocument')?.run();
 		});
 		// Cmd+. — Quick fix
 		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Period, () => {
 			editor!.getAction('editor.action.quickFix')?.run();
 		});
-		// Cmd+T — Workspace symbols
-		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyT, () => {
-			editor!.getAction('editor.action.showAllSymbols')?.run();
-		});
 		// Cmd+Alt+I — Toggle inlay hints
 		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyI, () => {
 			inlayHintsEnabled = !inlayHintsEnabled;
 			editor!.updateOptions({ inlayHints: { enabled: inlayHintsEnabled ? 'on' : 'off' } });
 			toast.info(inlayHintsEnabled ? 'Inlay hints enabled' : 'Inlay hints disabled');
+			updateSettings({ inlayHints: inlayHintsEnabled }).catch((e) => log.warn('[FocusZone] updateSettings inlayHints', e));
 		});
 
 		// Track content changes (skip programmatic setValue calls)
 		editor.onDidChangeModelContent(() => {
 			if (settingContent) return;
 			const file = $activeFile;
-			if (file) {
-				updateFileContent(file.path, editor!.getValue());
+			if (!file) return;
+			updateFileContent(file.path, editor!.getValue());
+
+			// Auto-save after delay if enabled
+			const s = get(settings);
+			if (s.autoSave === 'afterDelay') {
+				if (autoSaveTimer) clearTimeout(autoSaveTimer);
+				autoSaveTimer = setTimeout(async () => {
+					const currentFile = $activeFile;
+					if (!currentFile?.modified) return;
+					try {
+						await invoke('write_file', { path: currentFile.path, content: editor!.getValue() });
+						markFileSaved(currentFile.path);
+					} catch { /* ignore auto-save errors */ }
+				}, s.autoSaveDelay ?? 500);
 			}
 		});
 
@@ -309,6 +332,73 @@
 		// Track cursor position
 		editor.onDidChangeCursorPosition((e) => {
 			cursorLineStore.set(e.position.lineNumber);
+			cursorColumnStore.set(e.position.column);
+		});
+
+		// Sync LSP diagnostics to the diagnostics store for ProblemsPanel
+		function syncMarkers() {
+			const root = get(projectRoot) ?? '';
+			const allMarkers = monaco.editor.getModelMarkers({});
+			diagnostics.set(allMarkers.map(m => {
+				const abs = m.resource.path;
+				const rel = root && abs.startsWith(root) ? abs.slice(root.length).replace(/^\//, '') : abs;
+				// Monaco severities: Error=8, Warning=4, Info=2, Hint=1 → map to 1-4
+				const sev = m.severity === 8 ? 1 : m.severity === 4 ? 2 : m.severity === 2 ? 3 : 4;
+				return {
+					filePath: rel,
+					absPath: abs,
+					line: m.startLineNumber,
+					column: m.startColumn,
+					endLine: m.endLineNumber,
+					endColumn: m.endColumn,
+					message: m.message,
+					severity: sev as 1 | 2 | 3 | 4,
+				};
+			}));
+		}
+		monaco.editor.onDidChangeMarkers(() => syncMarkers());
+
+		// Fix Cmd+Z / Cmd+Y — override Monaco's commands explicitly so the
+		// native macOS Edit menu (even if present) doesn't intercept them.
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => {
+			editor!.trigger('keyboard', 'undo', null);
+		});
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ, () => {
+			editor!.trigger('keyboard', 'redo', null);
+		});
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, () => {
+			editor!.trigger('keyboard', 'redo', null);
+		});
+
+		// Cmd+T — toggle terminal (Monaco intercepts this as "Go to Symbol in Workspace")
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyT, () => {
+			toggleTerminal();
+		});
+
+		// Cmd+Shift+Enter — send selection + file context to active agent terminal
+		// (overrides Monaco's "Insert Line Above" which is less critical)
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
+			const sessionId = get(activeSessionId);
+			const sel = editor!.getModel()?.getValueInRange(editor!.getSelection()!) ?? '';
+			const file = get(activeFile);
+			if (!sessionId || !sel || !file) return;
+			const root = get(projectRoot);
+			const rel = root ? file.path.replace(root + '/', '') : file.path;
+			const ext = file.name.split('.').pop() ?? '';
+			const text = `[${rel}]\n\`\`\`${ext}\n${sel}\n\`\`\`\n`;
+			invoke('write_terminal', { id: sessionId, data: text }).catch((e) => log.warn('[FocusZone] write_terminal to agent', e));
+			focusAgentTerminal.update(n => n + 1);
+		});
+
+		// Consume pending editor actions (e.g. goto-line from QuickOpenPalette / StatusBar)
+		unsubscribeEditorActionRef = pendingEditorAction.subscribe(action => {
+			if (!action || !editor) return;
+			if (action.type === 'goto-line') {
+				editor.revealLineInCenter(action.line);
+				editor.setPosition({ lineNumber: action.line, column: 1 });
+				editor.focus();
+			}
+			pendingEditorAction.set(null);
 		});
 
 		// Signal that the editor is ready — the $projectRoot $effect re-runs and
@@ -322,7 +412,7 @@
 	$effect(() => {
 		const root = $projectRoot;
 		if (!editorReady || !root) return;
-		lspClientManager.startWorkspaceServers(root).catch(() => {});
+		lspClientManager.startWorkspaceServers(root).catch((e) => log.warn('[FocusZone] startWorkspaceServers', e));
 	});
 
 	// React to file changes — use per-file models with file:// URIs so LSP can
@@ -370,7 +460,7 @@
 							return list;
 						});
 					}
-				}).catch(() => {});
+				}).catch((e) => log.warn('[FocusZone] checkSingleServer', e));
 			}
 		} else {
 			// No file open — show an empty plaintext model
@@ -856,8 +946,12 @@
 		diffEditor?.getModifiedEditor().focus();
 	}
 
+	let unsubscribeEditorActionRef: (() => void) | null = null;
+
 	onDestroy(() => {
 		if (hideChunkTimer) clearTimeout(hideChunkTimer);
+		if (autoSaveTimer) clearTimeout(autoSaveTimer);
+		unsubscribeEditorActionRef?.();
 		// Do NOT stop LSP servers here — FocusZone unmounts when navigating to
 		// Settings/GitView, but the workspace is still open and servers should
 		// keep running. stopAll() is called only on workspace close.
@@ -931,6 +1025,7 @@
 		<AgentEditBar />
 		<InlineEditOverlay />
 		<div class="editor-container" class:hidden={!$activeFile} bind:this={editorContainer}></div>
+		<StatusBar />
 	</div>
 </div>
 
@@ -946,13 +1041,15 @@
 		width: 100%;
 		height: 100%;
 		position: relative;
+		display: flex;
+		flex-direction: column;
 	}
 	.editor-layer.hidden {
 		display: none;
 	}
 	.editor-container {
-		width: 100%;
-		height: 100%;
+		flex: 1;
+		min-height: 0;
 	}
 	.editor-container.hidden {
 		display: none;
@@ -962,7 +1059,8 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		height: 100%;
+		flex: 1;
+		min-height: 0;
 		color: var(--color-text-subtle);
 		gap: 12px;
 	}

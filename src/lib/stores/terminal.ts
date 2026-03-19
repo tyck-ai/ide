@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { log } from '$lib/log';
 
 export interface TerminalSession {
 	id: string;
@@ -69,5 +70,5 @@ export async function sendCommandToTerminal(cmd: string): Promise<void> {
 		await new Promise((r) => setTimeout(r, 500));
 	}
 
-	await invoke('write_terminal', { id, data: cmd + '\r' }).catch(() => {});
+	await invoke('write_terminal', { id, data: cmd + '\r' }).catch((e) => log.warn('[terminal] sendCommandToTerminal write_terminal', e));
 }

@@ -3,7 +3,7 @@ mod mcp;
 mod wasm;
 mod apps;
 
-use commands::{checkpoint, fs, git, lsp, settings, terminal, tyck, worktree};
+use commands::{checkpoint, fs, git, logs, lsp, search, settings, terminal, tyck, worktree};
 use lsp::LspManager;
 use apps::commands as tapp_commands;
 use apps::manager::create_shared_manager;
@@ -69,6 +69,7 @@ fn open_workspace_window(app: &tauri::AppHandle, path: Option<String>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    logs::install_panic_hook();
     let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
     let app_manager = rt.block_on(async {
         create_shared_manager().await.expect("Failed to create app manager")
@@ -128,10 +129,10 @@ pub fn run() {
                 .item(&open_folder_item)
                 .build()?;
 
+            // Note: undo/redo are intentionally omitted — the native macOS Undo accelerator
+            // intercepts Cmd+Z before Monaco's JS keydown handler can receive it, breaking
+            // Monaco's own undo stack. Monaco handles Cmd+Z/Y internally via addCommand.
             let edit_menu = SubmenuBuilder::new(app, "Edit")
-                .item(&PredefinedMenuItem::undo(app, None)?)
-                .item(&PredefinedMenuItem::redo(app, None)?)
-                .separator()
                 .item(&PredefinedMenuItem::cut(app, None)?)
                 .item(&PredefinedMenuItem::copy(app, None)?)
                 .item(&PredefinedMenuItem::paste(app, None)?)
@@ -223,6 +224,13 @@ pub fn run() {
             fs::write_file,
             fs::watch_directory,
             fs::stop_watching,
+            fs::create_file,
+            fs::create_directory,
+            fs::rename_path,
+            fs::delete_path,
+            fs::reveal_in_file_manager,
+            search::search_in_project,
+            search::replace_in_project,
             git::git_status,
             git::git_is_repo,
             git::git_init_repo,
@@ -278,6 +286,7 @@ pub fn run() {
             settings::save_custom_theme,
             settings::delete_custom_theme,
             settings::export_theme,
+            logs::append_log,
             checkpoint::create_checkpoint,
             checkpoint::scan_changes,
             checkpoint::get_checkpoint_summary,

@@ -1,5 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { log } from '$lib/log';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { activeSessionId } from './activeSession';
@@ -405,7 +406,7 @@ function createSessionReviewStore() {
 		if (isOpen) {
 			invoke<string>('read_file', { path: fullPath })
 				.then(content => updateFileContent(fullPath, content))
-				.catch(() => {});
+				.catch((e) => log.warn('[sessionReview] reloadOpenBuffer read_file', e));
 		}
 	}
 

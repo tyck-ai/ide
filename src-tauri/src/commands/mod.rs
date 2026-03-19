@@ -1,5 +1,6 @@
 pub mod fs;
 pub mod git;
+pub mod logs;
 pub mod terminal;
 pub mod tyck;
 pub mod settings;
@@ -7,3 +8,4 @@ pub mod providers;
 pub mod checkpoint;
 pub mod worktree;
 pub mod lsp;
+pub mod search;

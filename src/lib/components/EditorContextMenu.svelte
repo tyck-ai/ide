@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { contextMenuStore } from '$lib/stores/lsp';
 	import { getServerConfig } from '$lib/lsp/serverRegistry';
+	import { log } from '$lib/log';
 	import type * as Monaco from 'monaco-editor';
 
 	interface Props {
@@ -32,14 +33,14 @@
 		const full = model.uri.fsPath || model.uri.path;
 		// Strip everything up to the first path segment that looks like a project root
 		// by finding the projectRoot prefix; fall back to basename if not found.
-		navigator.clipboard.writeText(full).catch(() => {});
+		navigator.clipboard.writeText(full).catch((e) => log.warn('[EditorContextMenu] clipboard writeText', e));
 		close();
 	}
 
 	function copyAbsPath() {
 		const model = editor?.getModel();
 		if (!model) { close(); return; }
-		navigator.clipboard.writeText(model.uri.fsPath || model.uri.path).catch(() => {});
+		navigator.clipboard.writeText(model.uri.fsPath || model.uri.path).catch((e) => log.warn('[EditorContextMenu] clipboard writeText', e));
 		close();
 	}
 </script>
