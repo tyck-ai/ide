@@ -5,6 +5,13 @@ import type { AppListing } from './tapp';
 export const showContext = writable(true);
 export const showInsight = writable(true);
 
+// Quick open palette
+export const showQuickOpen = writable(false);
+export const quickOpenMode = writable<'file' | 'line' | 'symbol'>('file');
+
+// Context zone tabs (dev mode)
+export const contextZoneTab = writable<'explorer' | 'search'>('explorer');
+
 // Full-page views
 export const showSettings = writable(false);
 export const showGitView = writable(false);
@@ -28,3 +35,6 @@ export const pendingInstall = writable<PendingInstall | null>(null);
 
 // Session sidebar visibility (agent mode)
 export const showSessionSidebar = writable(false);
+
+// Problems panel (LSP diagnostics)
+export const showProblems = writable(false);

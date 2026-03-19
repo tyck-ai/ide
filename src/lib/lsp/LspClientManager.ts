@@ -1,6 +1,7 @@
 import { MonacoLanguageClient } from 'monaco-languageclient';
 import { CloseAction, ErrorAction, State } from 'vscode-languageclient/browser';
 import { writable, get } from 'svelte/store';
+import { log } from '$lib/log';
 import { createTauriTransport, type LspTransport } from './TauriTransport';
 import { getServerConfig, normalizeLanguage, supportedLanguages } from './serverRegistry';
 import { checkSingleServer, detectWorkspaceLanguages } from './serverDiscovery';
@@ -170,7 +171,7 @@ class LspClientManager {
 					.sendNotification('workspace/didChangeConfiguration', {
 						settings: config.settings,
 					})
-					.catch(() => {});
+					.catch((e) => log.warn(`[lsp:${language}] sendNotification didChangeConfiguration`, e));
 			}
 		});
 
@@ -240,7 +241,7 @@ class LspClientManager {
 		const detected = await detectWorkspaceLanguages(workspaceRoot).catch(() => null);
 		const langs = detected?.length ? detected : supportedLanguages();
 		await Promise.all(
-			langs.map((lang) => this.getOrStart(lang, workspaceRoot).catch(() => {})),
+			langs.map((lang) => this.getOrStart(lang, workspaceRoot).catch((e) => log.warn(`[lsp] getOrStart ${lang}`, e))),
 		);
 	}
 }

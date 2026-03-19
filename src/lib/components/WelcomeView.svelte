@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount } from 'svelte';
 	interface Props {
 		onOpen: () => void;
 		onOpenRecent: (path: string) => void;
@@ -10,8 +10,6 @@
 	let mounted = $state(false);
 	// Multi-window mode tracks openWindows in Rust only; no single "last folder" hint.
 	const recentFolder: string | undefined = undefined;
-	let canvas: HTMLCanvasElement;
-	let animFrame: number;
 
 	function folderName(path: string): string {
 		return path.split('/').filter(Boolean).pop() || path;
@@ -34,108 +32,14 @@
 		}
 	}
 
-	function initRain() {
-		const ctx = canvas.getContext('2d');
-		if (!ctx) return;
-
-		const dpr = window.devicePixelRatio || 1;
-		let w = window.innerWidth;
-		let h = window.innerHeight;
-
-		function resize() {
-			w = window.innerWidth;
-			h = window.innerHeight;
-			canvas.width = w * dpr;
-			canvas.height = h * dpr;
-			canvas.style.width = w + 'px';
-			canvas.style.height = h + 'px';
-			ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
-		}
-		resize();
-		window.addEventListener('resize', resize);
-
-		const fontSize = 20;
-		const lineHeight = fontSize * 1.6;
-		const cols = Math.ceil(w / fontSize);
-		const rows = Math.ceil(h / lineHeight) + 2;
-
-		// Build a static grid of 0s and 1s, scrolling upward
-		interface Column {
-			chars: string[];
-			offset: number;       // fractional y offset in px
-			speed: number;        // px per frame
-			alpha: number;        // column brightness
-		}
-
-		const columns: Column[] = Array.from({ length: cols }, () => ({
-			chars: Array.from({ length: rows * 2 }, () => Math.random() < 0.5 ? '0' : '1'),
-			offset: Math.random() * lineHeight * rows,
-			speed: 0.15 + Math.random() * 0.35,
-			alpha: 0.06 + Math.random() * 0.14,
-		}));
-
-		function draw() {
-			ctx!.clearRect(0, 0, w, h);
-			ctx!.fillStyle = '#11111b';
-			ctx!.fillRect(0, 0, w, h);
-
-			ctx!.font = `${fontSize}px "SF Mono", "Fira Code", "JetBrains Mono", monospace`;
-
-			for (let i = 0; i < cols; i++) {
-				const col = columns[i];
-				const x = i * fontSize;
-
-				ctx!.fillStyle = `rgba(137, 180, 250, ${col.alpha})`;
-
-				for (let r = 0; r < col.chars.length; r++) {
-					const y = r * lineHeight - col.offset;
-					if (y < -lineHeight || y > h + lineHeight) continue;
-					ctx!.fillText(col.chars[r], x, y);
-				}
-
-				// Scroll downward
-				col.offset -= col.speed;
-
-				// Wrap around seamlessly
-				if (col.offset < 0) {
-					col.offset += lineHeight * rows;
-					// Refresh some chars for variety
-					for (let r = 0; r < col.chars.length; r++) {
-						if (Math.random() < 0.1) {
-							col.chars[r] = Math.random() < 0.5 ? '0' : '1';
-						}
-					}
-				}
-			}
-
-			animFrame = requestAnimationFrame(draw);
-		}
-
-		draw();
-
-		return () => {
-			window.removeEventListener('resize', resize);
-		};
-	}
-
-	let cleanupResize: (() => void) | undefined;
-
 	onMount(() => {
-		cleanupResize = initRain();
 		requestAnimationFrame(() => { mounted = true; });
-	});
-
-	onDestroy(() => {
-		if (animFrame) cancelAnimationFrame(animFrame);
-		cleanupResize?.();
 	});
 </script>
 
 <svelte:window onkeydown={onKeydown} />
 
 <div class="welcome" class:mounted>
-	<canvas bind:this={canvas} class="rain"></canvas>
-
 	<div class="content">
 		<div class="brand">
 			<div class="logo">tyck</div>
@@ -181,12 +85,6 @@
 		background: var(--color-surface);
 		position: relative;
 		overflow: hidden;
-	}
-
-	.rain {
-		position: absolute;
-		inset: 0;
-		z-index: 0;
 	}
 
 	.content {

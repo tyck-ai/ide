@@ -8,6 +8,7 @@
 	import { switchToMode } from '$lib/stores/modeSwitch';
 	import { startGitPoller } from '$lib/stores/git';
 	import { toast } from '$lib/stores/toast';
+	import { log } from '$lib/log';
 
 	let showDropdown = $state(false);
 	let showGitInit = $state(false);
@@ -63,7 +64,7 @@
 		if (fp) ctx += ']';
 		if (sel) ctx += ` [selection: ${sel}]`;
 
-		invoke('write_terminal', { id: termId, data: ctx + ' ' });
+		invoke('write_terminal', { id: termId, data: ctx + ' ' }).catch((e) => log.warn('[CommandRail] write_terminal', e));
 	}
 
 	function focusAgent() {

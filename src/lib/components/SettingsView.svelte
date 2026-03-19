@@ -20,6 +20,9 @@
 		type Theme,
 	} from '$lib/themes';
 	import { onMount } from 'svelte';
+	import { log } from '$lib/log';
+	import { activeKeybindings } from '$lib/stores/keybindings';
+	import { DEFAULT_KEYBINDINGS, groupByCategory, formatChord } from '$lib/keybindings';
 
 	const sections = [
 		{ id: 'appearance', label: 'Appearance' },
@@ -27,6 +30,7 @@
 		{ id: 'agents', label: 'Agents' },
 		{ id: 'apps', label: 'Apps' },
 		{ id: 'language-servers', label: 'Language Servers' },
+		{ id: 'keybindings', label: 'Keyboard Shortcuts' },
 	] as const;
 
 	type SectionId = (typeof sections)[number]['id'];
@@ -37,6 +41,92 @@
 	let jsonError = $state('');
 	let savingTheme = $state(false);
 
+	// Keyboard Shortcuts section state
+	let kbSearchQuery = $state('');
+	let recordingId = $state<string | null>(null);
+	let conflictInfo = $state<{ withId: string; withLabel: string } | null>(null);
+	let pendingChord = $state<string | null>(null);
+
+	const filteredBindings = $derived.by(() => {
+		const q = kbSearchQuery.toLowerCase().trim();
+		return $activeKeybindings.filter(kb =>
+			!q || kb.label.toLowerCase().includes(q) || kb.key.toLowerCase().includes(q) || kb.category.toLowerCase().includes(q)
+		);
+	});
+
+	function startRecording(id: string) {
+		recordingId = id;
+		conflictInfo = null;
+		pendingChord = null;
+	}
+
+	function cancelRecording() {
+		recordingId = null;
+		conflictInfo = null;
+		pendingChord = null;
+	}
+
+	function eventToChord(e: KeyboardEvent): string | null {
+		const isMac = navigator.platform.toUpperCase().includes('MAC');
+		const key = e.key.toLowerCase();
+		// Ignore modifier-only presses
+		if (['meta', 'control', 'alt', 'shift'].includes(key)) return null;
+		const parts: string[] = [];
+		if (isMac ? e.metaKey : e.ctrlKey) parts.push('cmd');
+		if (isMac && e.ctrlKey && !e.metaKey) parts.push('ctrl');
+		if (e.shiftKey) parts.push('shift');
+		if (e.altKey) parts.push('alt');
+		parts.push(key);
+		return parts.join('+');
+	}
+
+	function onRecordKeydown(e: KeyboardEvent) {
+		if (!recordingId) return;
+		if (e.key === 'Escape') { cancelRecording(); return; }
+		e.preventDefault();
+		e.stopPropagation();
+		const chord = eventToChord(e);
+		if (!chord) return;
+
+		// Check for conflicts
+		const existing = $activeKeybindings.find(kb => kb.key === chord && kb.id !== recordingId);
+		if (existing) {
+			conflictInfo = { withId: existing.id, withLabel: existing.label };
+			pendingChord = chord;
+		} else {
+			saveChord(recordingId, chord);
+		}
+	}
+
+	async function saveChord(id: string, chord: string) {
+		const overrides = { ...($settings.keybindings ?? {}), [id]: chord };
+		// If chord matches default, remove the override
+		const def = DEFAULT_KEYBINDINGS.find(kb => kb.id === id);
+		if (def && def.defaultKey === chord) delete overrides[id];
+		await updateSettings({ keybindings: overrides });
+		cancelRecording();
+	}
+
+	async function confirmConflict() {
+		if (!recordingId || !pendingChord || !conflictInfo) return;
+		// Remove the conflicting binding's override (reset it or unset it)
+		const overrides = { ...($settings.keybindings ?? {}), [recordingId]: pendingChord };
+		// Clear the conflicting one so it gets a new default or empty
+		delete overrides[conflictInfo.withId];
+		await updateSettings({ keybindings: overrides });
+		cancelRecording();
+	}
+
+	async function resetBinding(id: string) {
+		const overrides = { ...($settings.keybindings ?? {}) };
+		delete overrides[id];
+		await updateSettings({ keybindings: overrides });
+	}
+
+	async function resetAllKeybindings() {
+		await updateSettings({ keybindings: {} });
+	}
+
 	// Language Servers section state
 	let lspRecheckInProgress = $state(false);
 	let lspRestartingLang = $state<string | null>(null);
@@ -46,7 +136,7 @@
 		if (!root || lspRestartingLang === lang) return;
 		lspRestartingLang = lang;
 		await lspClientManager.stop(lang);
-		await lspClientManager.getOrStart(lang, root).catch(() => {});
+		await lspClientManager.getOrStart(lang, root).catch((e) => log.warn('[SettingsView] getOrStart', e));
 		lspRestartingLang = null;
 	}
 
@@ -56,7 +146,7 @@
 		lspRecheckInProgress = true;
 		dismissedLspNotifications.set(new Set()); // clear dismissed so all recheck
 		lspMissingServers.set([]);
-		await checkProjectOnOpen(root).catch(() => {});
+		await checkProjectOnOpen(root).catch((e) => log.warn('[SettingsView] checkProjectOnOpen', e));
 		lspRecheckInProgress = false;
 	}
 
@@ -220,7 +310,8 @@
 	}
 </script>
 
-<div class="settings-page">
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="settings-page" onkeydown={onRecordKeydown} role="dialog">
 	<!-- Sidebar -->
 	<nav class="sidebar">
 		<div class="sidebar-header">
@@ -360,6 +451,21 @@
 			<div class="content-header">
 				<h1 class="content-title">Workspace Mode</h1>
 				<p class="content-desc">Choose how AI agents interact with your code.</p>
+			</div>
+
+			<div class="lsp-format-row" style="margin-bottom: 24px;">
+				<div class="toggle-info">
+					<span class="toggle-label">Auto Save</span>
+					<span class="toggle-desc">Automatically save files after a short delay when changes are made.</span>
+				</div>
+				<select
+					class="select-input"
+					value={$settings.autoSave ?? 'off'}
+					onchange={(e) => updateSettings({ autoSave: (e.target as HTMLSelectElement).value as 'off' | 'afterDelay' | 'onFocusChange' })}
+				>
+					<option value="off">Off</option>
+					<option value="afterDelay">After Delay (500ms)</option>
+				</select>
 			</div>
 
 			<div class="mode-cards">
@@ -648,6 +754,58 @@
 					</div>
 				{/each}
 			</div>
+		{:else if activeSection === 'keybindings'}
+			<div class="content-header">
+				<div class="content-title-row">
+					<h1 class="content-title">Keyboard Shortcuts</h1>
+					<button class="refresh-btn" onclick={resetAllKeybindings}>Reset All</button>
+				</div>
+				<p class="content-desc">Click a shortcut to reassign it. Press Escape to cancel.</p>
+			</div>
+
+			<div class="kb-search-row">
+				<input
+					class="kb-search"
+					bind:value={kbSearchQuery}
+					placeholder="Search shortcuts..."
+				/>
+			</div>
+
+			{#each [...groupByCategory(filteredBindings)] as [category, bindings]}
+				<div class="kb-category-label">{category}</div>
+				{#each bindings as kb}
+					{@const isCustom = ($settings.keybindings ?? {})[kb.id] !== undefined}
+					{@const isRecording = recordingId === kb.id}
+					<div class="kb-row" class:recording={isRecording}>
+						<span class="kb-action-label">{kb.label}</span>
+						<div class="kb-chord-area">
+							{#if isRecording}
+								{#if conflictInfo && pendingChord}
+									<span class="kb-conflict-msg">
+										⚠ Already used by <strong>{conflictInfo.withLabel}</strong>
+									</span>
+									<button class="kb-btn-reassign" onclick={confirmConflict}>Reassign</button>
+									<button class="kb-btn-cancel" onclick={cancelRecording}>Cancel</button>
+								{:else}
+									<span class="kb-recording-hint">Press shortcut…</span>
+									<button class="kb-btn-cancel" onclick={cancelRecording}>Cancel</button>
+								{/if}
+							{:else}
+								<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+								<span
+									class="kb-chord"
+									class:customised={isCustom}
+									onclick={() => startRecording(kb.id)}
+									title="Click to reassign"
+								>{formatChord(kb.key)}</span>
+								{#if isCustom}
+									<button class="kb-btn-reset" onclick={() => resetBinding(kb.id)} title="Reset to default">↺</button>
+								{/if}
+							{/if}
+						</div>
+					</div>
+				{/each}
+			{/each}
 		{/if}
 	</main>
 </div>
@@ -1465,6 +1623,20 @@
 		border-radius: 6px;
 	}
 
+	.select-input {
+		padding: 5px 10px;
+		background: var(--color-base);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 6px;
+		color: var(--color-text);
+		font-size: 12px;
+		cursor: pointer;
+		outline: none;
+	}
+	.select-input:focus {
+		border-color: var(--color-accent);
+	}
+
 	/* ── Language Servers ── */
 	.lsp-format-row {
 		display: flex;
@@ -1580,4 +1752,96 @@
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
+
+	/* ── Keyboard Shortcuts ── */
+	.kb-search-row {
+		padding: 0 0 16px;
+	}
+	.kb-search {
+		width: 100%;
+		padding: 7px 10px;
+		background: var(--color-base);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 6px;
+		color: var(--color-text);
+		font-size: 13px;
+		outline: none;
+		font-family: inherit;
+	}
+	.kb-search:focus { border-color: var(--color-accent); }
+	.kb-category-label {
+		font-size: 10px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.6px;
+		color: var(--color-text-subtle);
+		padding: 12px 0 6px;
+		border-bottom: 1px solid var(--color-border-muted);
+		margin-bottom: 2px;
+	}
+	.kb-row {
+		display: flex;
+		align-items: center;
+		padding: 6px 4px;
+		border-radius: 5px;
+		gap: 12px;
+	}
+	.kb-row:hover { background: var(--color-base); }
+	.kb-row.recording { background: color-mix(in srgb, var(--color-accent) 6%, transparent); }
+	.kb-action-label {
+		flex: 1;
+		font-size: 13px;
+		color: var(--color-text);
+	}
+	.kb-chord-area {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	.kb-chord {
+		font-size: 12px;
+		font-family: 'SF Mono', 'Fira Code', monospace;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 4px;
+		padding: 2px 8px;
+		color: var(--color-text-muted);
+		cursor: pointer;
+		user-select: none;
+		white-space: nowrap;
+	}
+	.kb-chord:hover { border-color: var(--color-accent); color: var(--color-text); }
+	.kb-chord.customised { border-color: var(--color-accent); color: var(--color-accent); }
+	.kb-recording-hint {
+		font-size: 12px;
+		color: var(--color-accent);
+		font-style: italic;
+		padding: 2px 8px;
+		border: 1px dashed var(--color-accent);
+		border-radius: 4px;
+	}
+	.kb-conflict-msg {
+		font-size: 12px;
+		color: var(--color-warning);
+	}
+	.kb-btn-reassign {
+		font-size: 11px;
+		padding: 2px 8px;
+		background: var(--color-warning);
+		color: var(--color-base);
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+		font-weight: 600;
+	}
+	.kb-btn-cancel, .kb-btn-reset {
+		font-size: 11px;
+		padding: 2px 8px;
+		background: none;
+		color: var(--color-text-subtle);
+		border: 1px solid var(--color-border-muted);
+		border-radius: 4px;
+		cursor: pointer;
+	}
+	.kb-btn-cancel:hover, .kb-btn-reset:hover { color: var(--color-text); border-color: var(--color-border); }
 </style>

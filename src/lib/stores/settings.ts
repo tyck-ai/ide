@@ -9,6 +9,10 @@ export interface TyckSettings {
 	activeTheme: string;
 	lspFormatOnSave?: boolean;
 	lspDismissed?: string[];
+	autoSave?: 'off' | 'afterDelay' | 'onFocusChange';
+	autoSaveDelay?: number;
+	keybindings?: Record<string, string>;
+	inlayHints?: boolean;
 }
 
 export interface ProviderInfo {

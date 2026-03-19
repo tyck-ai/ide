@@ -2,6 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import Terminal from './Terminal.svelte';
+	import ProblemsPanel from './ProblemsPanel.svelte';
 	import {
 		terminalSessions,
 		activeTerminalId,
@@ -9,6 +10,8 @@
 		addTerminal,
 		removeTerminal,
 	} from '$lib/stores/terminal';
+	import { showProblems } from '$lib/stores/layout';
+	import { diagnostics } from '$lib/stores/lsp';
 	import { get } from 'svelte/store';
 	import { projectRoot } from '$lib/stores/editor';
 
@@ -66,6 +69,11 @@
 		}
 	});
 
+	const panelOpen = $derived($terminalVisible || $showProblems);
+
+	const errorCount = $derived($diagnostics.filter(d => d.severity === 1).length);
+	const warnCount  = $derived($diagnostics.filter(d => d.severity === 2).length);
+
 	// Auto-create first terminal if none exist when panel becomes visible
 	$effect(() => {
 		if ($terminalVisible && $terminalSessions.length === 0) {
@@ -74,12 +82,12 @@
 	});
 </script>
 
-{#if $terminalSessions.length > 0}
+{#if panelOpen || $terminalSessions.length > 0}
 	<div
 		class="terminal-panel"
 		class:dragging
-		class:collapsed={!$terminalVisible}
-		style="height: {$terminalVisible ? panelHeight : 0}px"
+		class:collapsed={!panelOpen}
+		style="height: {panelOpen ? panelHeight : 0}px"
 	>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="drag-handle-h" onmousedown={onDragStart}>
@@ -88,12 +96,30 @@
 
 		<div class="tabs-row">
 			<div class="tabs">
+				<!-- Problems tab -->
+				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+				<div
+					class="tab"
+					class:active={$showProblems}
+					onclick={() => { showProblems.set(true); terminalVisible.set(false); }}
+					role="tab"
+					tabindex="0"
+				>
+					<span class="tab-icon problems-icon">⚑</span>
+					<span class="tab-name">Problems</span>
+					{#if errorCount > 0}
+						<span class="diag-badge error">{errorCount}</span>
+					{:else if warnCount > 0}
+						<span class="diag-badge warn">{warnCount}</span>
+					{/if}
+				</div>
+
 				{#each $terminalSessions as session (session.id)}
 					<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 					<div
 						class="tab"
-						class:active={session.id === $activeTerminalId}
-						onclick={() => activeTerminalId.set(session.id)}
+						class:active={!$showProblems && session.id === $activeTerminalId}
+						onclick={() => { showProblems.set(false); terminalVisible.set(true); activeTerminalId.set(session.id); }}
 						role="tab"
 						tabindex="0"
 					>
@@ -107,18 +133,22 @@
 				{/each}
 			</div>
 			<button class="new-btn" onclick={newTerminal} title="New terminal">+</button>
-			<button class="hide-btn" onclick={hidePanel} title="Hide terminal (Ctrl+`)">
+			<button class="hide-btn" onclick={() => { terminalVisible.set(false); showProblems.set(false); }} title="Hide panel (Ctrl+`)">
 				<span class="hide-label">Hide</span>
 				<span class="hide-shortcut">⌃`</span>
 			</button>
 		</div>
 
 		<div class="terminal-content">
-			{#each $terminalSessions as session (session.id)}
-				<div class="terminal-tab-content" class:active={session.id === $activeTerminalId}>
-					<Terminal sessionId={session.id} />
-				</div>
-			{/each}
+			{#if $showProblems}
+				<ProblemsPanel />
+			{:else}
+				{#each $terminalSessions as session (session.id)}
+					<div class="terminal-tab-content" class:active={session.id === $activeTerminalId}>
+						<Terminal sessionId={session.id} />
+					</div>
+				{/each}
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -211,6 +241,16 @@
 	.tab-close:hover {
 		opacity: 1;
 	}
+	.problems-icon { color: var(--color-text-subtle); }
+	.diag-badge {
+		font-size: 9px;
+		font-weight: 700;
+		padding: 0 4px;
+		border-radius: 8px;
+		line-height: 1.4;
+	}
+	.diag-badge.error { background: color-mix(in srgb, var(--color-error) 20%, transparent); color: var(--color-error); }
+	.diag-badge.warn  { background: color-mix(in srgb, var(--color-warning) 20%, transparent); color: var(--color-warning); }
 	.new-btn {
 		background: none;
 		border: none;

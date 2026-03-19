@@ -22,3 +22,16 @@ export const contextMenuStore = writable<ContextMenuState>({
 	y: 0,
 	language: '',
 });
+
+export interface DiagnosticMarker {
+	filePath: string;      // relative path
+	absPath: string;
+	line: number;
+	column: number;
+	endLine: number;
+	endColumn: number;
+	message: string;
+	severity: 1 | 2 | 3 | 4; // monaco: Error=8, Warn=4, Info=2, Hint=1 — we map to 1-4
+}
+
+export const diagnostics = writable<DiagnosticMarker[]>([]);

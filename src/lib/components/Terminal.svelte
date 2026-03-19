@@ -4,6 +4,9 @@
 	import { listen } from '@tauri-apps/api/event';
 	import { projectRoot } from '$lib/stores/editor';
 	import { activeTheme, getXtermTheme } from '$lib/themes';
+	import { activeSessionId, focusAgentTerminal } from '$lib/stores/activeSession';
+	import { get } from 'svelte/store';
+	import { log } from '$lib/log';
 
 	let { sessionId = '' }: { sessionId: string } = $props();
 
@@ -83,6 +86,24 @@
 		// Write terminal input to PTY
 		terminal.onData((data: string) => {
 			invoke('write_terminal', { id: sessionId, data }).catch(() => { /* PTY closed */ });
+		});
+
+		// Cmd+Shift+Enter: send selected terminal text to agent
+		terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+			const isMac = navigator.platform.toUpperCase().includes('MAC');
+			const cmdHeld = isMac ? e.metaKey : e.ctrlKey;
+			if (cmdHeld && e.shiftKey && e.code === 'Enter' && e.type === 'keydown') {
+				const selection = terminal.getSelection();
+				if (selection) {
+					const agentId = get(activeSessionId);
+					if (agentId) {
+						invoke('write_terminal', { id: agentId, data: selection + '\n' }).catch((e) => log.warn('[Terminal] write_terminal to agent', e));
+						focusAgentTerminal.update(n => n + 1);
+					}
+				}
+				return false; // prevent xterm from handling
+			}
+			return true;
 		});
 
 		// Handle resize with debounce
