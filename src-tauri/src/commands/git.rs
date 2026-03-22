@@ -113,6 +113,26 @@ pub struct GitContextResult {
     pub sub_repos: Vec<SubRepo>,
 }
 
+/// Walk up from a file path until a .git dir/file is found. Returns the git root.
+/// Used to follow the active file in the git panel.
+#[tauri::command]
+pub fn find_git_root_for_file(file_path: String) -> Option<String> {
+    let mut path = PathBuf::from(&file_path);
+    // Start from the file's parent directory
+    if path.is_file() {
+        path.pop();
+    }
+    loop {
+        let dot_git = path.join(".git");
+        if dot_git.is_dir() || dot_git.is_file() {
+            return Some(path.to_string_lossy().into_owned());
+        }
+        if !path.pop() {
+            return None;
+        }
+    }
+}
+
 /// Check whether `cwd` is a git repo. If not, scan one level deep for sub-repos.
 /// Used by the new-session flow to offer a project picker or git-init prompt.
 #[tauri::command]

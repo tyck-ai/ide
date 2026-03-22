@@ -7,8 +7,7 @@
 	import { projectRoot } from '$lib/stores/editor';
 	import { startGitPoller } from '$lib/stores/git';
 	import { pickSessionName } from '$lib/utils/sessionNames';
-
-	interface SubRepo { name: string; path: string; }
+	import SubRepoPicker, { type SubRepo } from './SubRepoPicker.svelte';
 
 	interface Props {
 		onClose: () => void;
@@ -146,23 +145,7 @@
 			<p class="modal-sub">
 				This folder contains multiple projects. Which one should the agent work in?
 			</p>
-			<div class="repo-list">
-				{#each subRepos as repo}
-					<button
-						class="repo-item"
-						class:selected={selectedRepo === repo.path}
-						onclick={() => selectedRepo = repo.path}
-					>
-						<span class="repo-icon">
-							<svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-								<path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 010-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8z" fill="currentColor"/>
-							</svg>
-						</span>
-						<span class="repo-name">{repo.name}</span>
-						<span class="repo-path">{repo.path.replace(/^.*\/([^/]+\/[^/]+)$/, '$1')}</span>
-					</button>
-				{/each}
-			</div>
+			<SubRepoPicker repos={subRepos} selected={selectedRepo} onSelect={(p) => selectedRepo = p} />
 			{#if error}
 				<div class="error">{error}</div>
 			{/if}
@@ -305,50 +288,9 @@
 	@keyframes spin { to { transform: rotate(360deg); } }
 
 	/* ── Repo picker ── */
-	.repo-list {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-		max-height: 240px;
+	:global(.repo-list) {
+		max-height: 220px;
 		overflow-y: auto;
-	}
-	.repo-item {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 9px 12px;
-		border-radius: 7px;
-		border: 1px solid transparent;
-		background: var(--color-base);
-		cursor: pointer;
-		text-align: left;
-		transition: border-color 0.15s, background 0.15s;
-	}
-	.repo-item:hover {
-		background: var(--color-overlay);
-	}
-	.repo-item.selected {
-		border-color: var(--color-accent);
-		background: color-mix(in srgb, var(--color-accent) 8%, transparent);
-	}
-	.repo-icon {
-		color: var(--color-text-subtle);
-		flex-shrink: 0;
-		display: flex;
-	}
-	.repo-item.selected .repo-icon {
-		color: var(--color-accent);
-	}
-	.repo-name {
-		font-size: 13px;
-		font-weight: 500;
-		color: var(--color-text);
-		flex: 1;
-	}
-	.repo-path {
-		font-size: 11px;
-		color: var(--color-text-subtle);
-		opacity: 0.6;
 	}
 
 	/* ── Init path display ── */

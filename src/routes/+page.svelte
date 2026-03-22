@@ -30,13 +30,14 @@
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
 	import SessionSetupOverlay from '$lib/components/SessionSetupOverlay.svelte';
 	import { TappContainer } from '$lib/components/tapp';
-	import { projectRoot, resetWorkspace } from '$lib/stores/editor';
+	import { projectRoot, resetWorkspace, activeFilePath } from '$lib/stores/editor';
 	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab, gitAgentSessionId, showSessionSidebar, showQuickOpen, quickOpenMode, contextZoneTab, showProblems } from '$lib/stores/layout';
 	import { activeApp, tapp } from '$lib/stores/tapp';
 	import { toggleTerminal, terminalVisible } from '$lib/stores/terminal';
 	import { matchesBinding } from '$lib/stores/keybindings';
 	import { startAgentStatusListener, stopAgentStatusListener } from '$lib/stores/agentStatus';
-	import { startGitPoller, git } from '$lib/stores/git';
+	import { git } from '$lib/stores/git';
+	import { resetGitRootForWorkspace, followActiveFile } from '$lib/stores/activeGitRoot';
 	import '$lib/stores/agentGit'; // bootstrap agent git auto-tracking
 	import { checkProjectOnOpen } from '$lib/lsp/serverDiscovery';
 	import { lspClientManager } from '$lib/lsp/LspClientManager';
@@ -166,12 +167,15 @@
 		}
 	}
 
+	// Follow active file in the git panel (auto-switches git root to the file's repo)
+	$effect(() => { followActiveFile($activeFilePath); });
+
 	async function setWorkspace(cwd: string) {
 		// Stop any servers from the previous workspace before switching.
 		lspClientManager.stopAll().catch((e) => log.warn('[setWorkspace] lspClientManager.stopAll', e));
 		resetWorkspace();
 		projectRoot.set(cwd);
-		startGitPoller(cwd);
+		resetGitRootForWorkspace(cwd);
 		// Non-blocking: detect project languages and warn about missing servers
 		checkProjectOnOpen(cwd).catch((e) => log.warn('[setWorkspace] checkProjectOnOpen', e));
 		// Update window title to reflect the active project.
