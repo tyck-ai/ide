@@ -173,22 +173,39 @@ fn install_hint(language: &str) -> String {
 
 /// Find a binary by checking common install dirs (via resolve_binary) then PATH.
 fn find_binary(name: &str) -> Option<String> {
-    // resolve_binary searches /usr/local/bin, homebrew, ~/.cargo/bin, etc.
+    // resolve_binary searches /usr/local/bin, homebrew, ~/.cargo/bin, nvm, volta, etc.
     let resolved = resolve_binary(name);
     if resolved != name {
         return Some(resolved);
     }
 
-    // Fall back to scanning PATH directories (split_paths is OS-aware: ':' on Unix, ';' on Windows)
+    // Scan the process PATH (augmented at startup from the login shell).
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path_var) {
             let candidate = dir.join(name);
             if candidate.exists() {
-                return Some(candidate.to_string_lossy().to_string());
+                let found = candidate.to_string_lossy().to_string();
+                log::info!("[find_binary] '{}' found via PATH scan: {}", name, found);
+                return Some(found);
             }
         }
     }
 
+    // Last resort: ask a login shell so we catch anything the process PATH missed.
+    if let Ok(output) = std::process::Command::new("zsh")
+        .args(["-l", "-c", &format!("which {} 2>/dev/null", name)])
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() && std::path::Path::new(&path).exists() {
+                log::info!("[find_binary] '{}' found via shell fallback: {}", name, path);
+                return Some(path);
+            }
+        }
+    }
+
+    log::warn!("[find_binary] '{}' not found anywhere", name);
     None
 }
 
@@ -405,6 +422,7 @@ pub async fn lsp_check_binary(language: String) -> Result<LspBinaryStatus, Strin
 
     let path = find_binary(config.binary);
     let found = path.is_some();
+    log::info!("[lsp_check_binary] language='{}' binary='{}': found={}, path={:?}", language, config.binary, found, path);
     let hint = if found {
         None
     } else {

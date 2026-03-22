@@ -117,15 +117,22 @@ pub fn detect_providers() -> Vec<ProviderInfo> {
             // It's "installed" if resolve_binary found an actual path (not just the bare name)
             let installed = if resolved == binary {
                 // Bare name returned — wasn't found in known locations.
-                // Last resort: check if `which` would find it via PATH.
-                std::process::Command::new("which")
-                    .arg(binary)
+                // Last resort: ask a login shell. Using the process PATH alone is
+                // insufficient for GUI apps (macOS strips PATH to /usr/bin:/bin/...).
+                // zsh -l sources ~/.zprofile (Homebrew, Volta); for nvm we already
+                // scanned above, so this catches anything else in the user's PATH.
+                let found = std::process::Command::new("zsh")
+                    .args(["-l", "-c", &format!("which {} 2>/dev/null", binary)])
                     .output()
                     .map(|o| o.status.success())
-                    .unwrap_or(false)
+                    .unwrap_or(false);
+                log::info!("[detect_providers] '{}' not in known paths; shell fallback found={}", binary, found);
+                found
             } else {
                 true
             };
+
+            log::info!("[detect_providers] {} (binary='{}'): resolved='{}', installed={}", id, binary, resolved, installed);
 
             ProviderInfo {
                 id: id.to_string(),
