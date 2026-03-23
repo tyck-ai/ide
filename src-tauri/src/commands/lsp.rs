@@ -18,6 +18,7 @@ struct LspServer {
     language: String,
     stdin: Arc<Mutex<ChildStdin>>,
     child: Arc<Mutex<Child>>,
+    abort_handles: Vec<tokio::task::AbortHandle>,
 }
 
 pub struct LspManager {
@@ -294,10 +295,12 @@ pub async fn lsp_start(
     let stdin = child.stdin.take().ok_or("Failed to acquire stdin handle")?;
     let stdout = child.stdout.take().ok_or("Failed to acquire stdout handle")?;
 
+    let mut abort_handles = Vec::new();
+
     // Log stderr lines — critical for diagnosing server crashes and config errors
     if let Some(stderr) = child.stderr.take() {
         let lang_for_log = language.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut reader = BufReader::new(stderr);
             let mut line = String::new();
             loop {
@@ -313,6 +316,7 @@ pub async fn lsp_start(
                 }
             }
         });
+        abort_handles.push(handle.abort_handle());
     }
 
     let server_id = uuid::Uuid::new_v4().to_string();
@@ -320,7 +324,7 @@ pub async fn lsp_start(
 
     // Background task: stream stdout frames → Tauri Channel
     let app_handle = app.clone();
-    tokio::spawn(async move {
+    let stdout_handle = tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
         loop {
             match read_lsp_message(&mut reader).await {
@@ -339,12 +343,14 @@ pub async fn lsp_start(
         let _ = app_handle.emit(&format!("lsp-server-closed-{sid}"), ());
         log::info!("[lsp:{sid}] server process exited");
     });
+    abort_handles.push(stdout_handle.abort_handle());
 
     let server = LspServer {
         id: server_id.clone(),
         language: language.clone(),
         stdin: Arc::new(Mutex::new(stdin)),
         child: Arc::new(Mutex::new(child)),
+        abort_handles,
     };
 
     state.servers.write().await.insert(server_id.clone(), server);
@@ -378,6 +384,7 @@ pub async fn lsp_stop(
 ) -> Result<(), String> {
     let mut servers = state.servers.write().await;
     if let Some(server) = servers.remove(&server_id) {
+        for handle in server.abort_handles { handle.abort(); }
         let mut child = server.child.lock().await;
         child.kill().await.ok();
         log::info!("[lsp] stopped server (id={server_id})");
@@ -392,6 +399,7 @@ pub async fn lsp_stop_all(
 ) -> Result<(), String> {
     let mut servers = state.servers.write().await;
     for (id, server) in servers.drain() {
+        for handle in server.abort_handles { handle.abort(); }
         let mut child = server.child.lock().await;
         child.kill().await.ok();
         log::info!("[lsp] stopped server (id={id})");

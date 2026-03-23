@@ -28,6 +28,12 @@
 	let expandedDirs = $state(new Set<string>());
 	let rootPath = $state('');
 	let unlisten: UnlistenFn | null = null;
+	let watchGen = 0;
+
+	// Debounce + cancellation for tree refreshes
+	let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+	let loadGeneration = 0;
+	let pendingParents = new Set<string>();
 
 	// Context menu state
 	let ctxVisible = $state(false);
@@ -80,29 +86,98 @@
 	});
 
 	async function startWatching(path: string) {
+		const gen = ++watchGen;
 		await stopWatching();
+		if (gen !== watchGen) return;
 		try {
 			await invoke('watch_directory', { path, windowLabel: getCurrentWindow().label });
 		} catch (e) {
 			console.warn('watch_directory failed:', e);
 		}
-		unlisten = await listen<FsChangeEvent>('fs-change', (event) => {
+		if (gen !== watchGen) return;
+		const ul = await listen<FsChangeEvent>('fs-change', (event) => {
 			if (event.payload.windowLabel !== getCurrentWindow().label) return;
-			if (rootPath) loadTree(rootPath);
+			if (rootPath) scheduleRefresh(event.payload.parent);
 		});
+		if (gen !== watchGen) { ul(); return; } // stale — immediately unregister
+		unlisten = ul;
 	}
 
 	async function stopWatching() {
+		if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
 		if (unlisten) { unlisten(); unlisten = null; }
 		try { await invoke('stop_watching', { windowLabel: getCurrentWindow().label }); } catch { /* ignore */ }
 	}
 
 	onDestroy(() => { unsubWorkDir(); stopWatching(); });
 
+	/** Debounced entry point for fs-change events. Batches rapid changes then
+	 *  does a targeted subtree refresh for single-dir changes, full reload otherwise. */
+	function scheduleRefresh(changedParent: string) {
+		pendingParents.add(changedParent);
+		if (refreshTimer) clearTimeout(refreshTimer);
+		refreshTimer = setTimeout(async () => {
+			refreshTimer = null;
+			if (!rootPath) return;
+
+			const parents = pendingParents;
+			pendingParents = new Set();
+			const gen = ++loadGeneration;
+
+			// Single changed dir inside the tree → targeted subtree refresh
+			let targetPath = rootPath;
+			if (parents.size === 1) {
+				const [p] = parents;
+				if (p !== rootPath && p.startsWith(rootPath + '/')) targetPath = p;
+			}
+
+			try {
+				const result = await invoke<DirEntry[]>('read_directory', { path: targetPath });
+				if (gen !== loadGeneration) return; // superseded by a newer load
+				if (targetPath === rootPath) {
+					tree = result;
+				} else {
+					tree = mergeSubtree(tree, targetPath, result);
+				}
+				fileIndex.set(buildFileIndex(tree, rootPath));
+				pruneExpandedDirs();
+			} catch { /* ignore transient errors */ }
+		}, 250);
+	}
+
+	/** Recursively replace the children of the node at targetPath with newChildren. */
+	function mergeSubtree(nodes: DirEntry[], targetPath: string, newChildren: DirEntry[]): DirEntry[] {
+		return nodes.map(node => {
+			if (!node.is_dir) return node;
+			if (node.path === targetPath) return { ...node, children: newChildren };
+			if (node.children && targetPath.startsWith(node.path + '/')) {
+				return { ...node, children: mergeSubtree(node.children, targetPath, newChildren) };
+			}
+			return node;
+		});
+	}
+
+	/** Remove expandedDirs entries for paths that no longer exist in the tree. */
+	function pruneExpandedDirs() {
+		if (expandedDirs.size === 0) return;
+		const allPaths = new Set<string>();
+		(function collect(nodes: DirEntry[]) {
+			for (const n of nodes) {
+				if (n.is_dir) { allPaths.add(n.path); if (n.children) collect(n.children); }
+			}
+		})(tree);
+		const pruned = new Set([...expandedDirs].filter(p => allPaths.has(p)));
+		if (pruned.size < expandedDirs.size) expandedDirs = pruned;
+	}
+
 	async function loadTree(path: string) {
+		const gen = ++loadGeneration;
 		try {
-			tree = await invoke('read_directory', { path });
-			fileIndex.set(buildFileIndex(tree, path));
+			const result = await invoke<DirEntry[]>('read_directory', { path });
+			if (gen !== loadGeneration) return;
+			tree = result;
+			fileIndex.set(buildFileIndex(result, path));
+			pruneExpandedDirs();
 		} catch (e) {
 			console.error('Failed to read directory:', e);
 		}

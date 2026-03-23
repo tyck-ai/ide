@@ -226,7 +226,7 @@ export function createGitStore() {
 
 			update(s => ({
 				...s,
-				commits: skip === 0 ? commits : [...s.commits, ...commits],
+				commits: skip === 0 ? commits : [...s.commits, ...commits].slice(0, 500),
 			}));
 		} catch (e) {
 			console.error('Failed to refresh commits:', e);
@@ -554,6 +554,12 @@ export function createGitStore() {
 
 		// Initial refresh
 		await refresh();
+
+		// Not a git repo — no point polling. Will restart when a valid repo is selected.
+		if (!get({ subscribe }).isRepo) {
+			currentPath = null;
+			return;
+		}
 
 		// 1. Watch .git directory for changes (instant updates)
 		const windowLabel = getCurrentWindow().label;

@@ -75,7 +75,7 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	// When resuming, try to find the original worktree that was used for this session
 	let id: string;
 	let existingWorktreePath: string | null = null;
-	
+
 	if (resumeSessionId && cwd) {
 		try {
 			const result = await invoke<[string, string] | null>('find_worktree_for_resume', {
@@ -93,6 +93,14 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 		}
 	} else {
 		id = crypto.randomUUID();
+	}
+
+	// Clean up any leftover listeners from a previous spawn of this session ID
+	// (happens when resuming a session that exited without a formal close)
+	const staleUnlistens = sessionUnlistens.get(id);
+	if (staleUnlistens) {
+		for (const unlisten of staleUnlistens) unlisten();
+		sessionUnlistens.delete(id);
 	}
 
 	// Initialize tyck project structure (provider-specific setup handled in Rust)
@@ -371,6 +379,9 @@ export async function resumeAgent(sessionId: string) {
 export async function closeAgentSession(id: string): Promise<void> {
 	// Clean up session UI state
 	clearSessionState(id);
+
+	// Clean up pause-tracking state
+	devEditsWhilePaused.delete(id);
 
 	// Clean up event listeners for this session
 	const unlistens = sessionUnlistens.get(id);

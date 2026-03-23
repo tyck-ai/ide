@@ -32,6 +32,21 @@ fn append_backlog(id: &str, data: &[u8]) {
     }
 }
 
+/// Drop guard that removes PTY state and emits `pty-exit-<id>` when dropped.
+/// Runs even if the reader thread panics, preventing fd and map leaks.
+struct PtyExitGuard {
+    id: String,
+    app: AppHandle,
+}
+
+impl Drop for PtyExitGuard {
+    fn drop(&mut self) {
+        if let Ok(mut handles) = PTY_HANDLES.lock() { handles.remove(&self.id); }
+        if let Ok(mut backlogs) = PTY_BACKLOGS.lock() { backlogs.remove(&self.id); }
+        let _ = self.app.emit(&format!("pty-exit-{}", self.id), ());
+    }
+}
+
 #[tauri::command]
 pub fn get_terminal_backlog(id: String) -> Result<String, String> {
     let backlogs = PTY_BACKLOGS.lock().map_err(|e| e.to_string())?;
@@ -90,6 +105,7 @@ pub async fn spawn_terminal(
     let tid = id.clone();
     let app_clone = app.clone();
     std::thread::spawn(move || {
+        let _guard = PtyExitGuard { id: tid.clone(), app: app_clone.clone() };
         let mut buf = [0u8; 4096];
         loop {
             match reader.read(&mut buf) {
@@ -102,12 +118,7 @@ pub async fn spawn_terminal(
                 Err(_) => break,
             }
         }
-        // Process exited — release the PTY master handle so the fd is closed.
-        // Backlog is intentionally kept for replay until explicit kill_terminal.
-        if let Ok(mut handles) = PTY_HANDLES.lock() {
-            handles.remove(&tid);
-        }
-        let _ = app_clone.emit(&format!("pty-exit-{}", tid), ());
+        // _guard drops: removes handle/backlog, emits pty-exit
     });
 
     Ok(())
@@ -200,6 +211,7 @@ pub async fn spawn_agent_terminal(
     let tid = id.clone();
     let app_clone = app.clone();
     std::thread::spawn(move || {
+        let _guard = PtyExitGuard { id: tid.clone(), app: app_clone.clone() };
         let mut buf = [0u8; 4096];
         loop {
             match reader.read(&mut buf) {
@@ -212,7 +224,7 @@ pub async fn spawn_agent_terminal(
                 Err(_) => break,
             }
         }
-        let _ = app_clone.emit(&format!("pty-exit-{}", tid), ());
+        // _guard drops: removes handle/backlog, emits pty-exit
     });
 
     Ok(())
@@ -278,6 +290,7 @@ pub async fn spawn_agent_with_worktree_setup(
     let tid = id.clone();
     let app_r = app.clone();
     std::thread::spawn(move || {
+        let _guard = PtyExitGuard { id: tid.clone(), app: app_r.clone() };
         let mut buf = [0u8; 4096];
         loop {
             match reader.read(&mut buf) {
@@ -289,10 +302,7 @@ pub async fn spawn_agent_with_worktree_setup(
                 }
             }
         }
-        if let Ok(mut handles) = PTY_HANDLES.lock() {
-            handles.remove(&tid);
-        }
-        let _ = app_r.emit(&format!("pty-exit-{}", tid), ());
+        // _guard drops: removes handle/backlog, emits pty-exit
     });
 
     // Background setup thread: holds the PTY slave until the agent is ready to start.
@@ -409,6 +419,8 @@ pub async fn spawn_agent_with_worktree_setup(
                                 Ok(n) => {
                                     leftover
                                         .push_str(&String::from_utf8_lossy(&buf[..n]));
+                                    // Guard against a pathological line with no newline
+                                    if leftover.len() > 4096 { leftover.clear(); }
                                     // Split on \r or \n — git uses both
                                     while let Some(pos) =
                                         leftover.find(|c: char| c == '\r' || c == '\n')
