@@ -224,17 +224,17 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 		sessionUnlistens.set(id, setupUnlistens);
 
 		// Listen for worktree-ready before spawning so we never miss the event.
-		listen(`worktree-ready-${id}`, async () => {
+		// Awaited so the unlisten is tracked before invoke() can throw.
+		const worktreeReadyUnlisten = await listen(`worktree-ready-${id}`, async () => {
 			try {
 				await sessionReview.refreshDiffs(id);
 			} catch {
 				// non-critical
 			}
-		}).then((unlisten) => {
-			const existing = sessionUnlistens.get(id) ?? [];
-			existing.push(unlisten);
-			sessionUnlistens.set(id, existing);
 		});
+		const worktreeReadyList = sessionUnlistens.get(id) ?? [];
+		worktreeReadyList.push(worktreeReadyUnlisten);
+		sessionUnlistens.set(id, worktreeReadyList);
 
 		// Non-blocking: terminal opens immediately, worktree setup runs in background.
 		await invoke('spawn_agent_with_worktree_setup', {
