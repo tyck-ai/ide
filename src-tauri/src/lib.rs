@@ -8,7 +8,7 @@ use lsp::LspManager;
 use apps::commands as tapp_commands;
 use apps::manager::create_shared_manager;
 use apps::store::AppStore;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
@@ -17,6 +17,10 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuild
 use tauri::{Emitter, Manager};
 
 static WINDOW_COUNTER: AtomicU32 = AtomicU32::new(1);
+
+// Set to true when the app is about to quit so window Destroyed events don't
+// wipe open_windows from settings — we want all workspaces to reopen on restart.
+static QUITTING: AtomicBool = AtomicBool::new(false);
 
 // Maps window label → workspace path so we can remove entries when a window closes.
 static WINDOW_PATHS: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -27,6 +31,17 @@ static LAST_FOCUSED: Mutex<Option<String>> = Mutex::new(None);
 
 fn window_paths() -> std::sync::MutexGuard<'static, HashMap<String, String>> {
     WINDOW_PATHS.lock().unwrap()
+}
+
+/// Called by the frontend when it opens a workspace (either from the welcome screen
+/// or from the URL param). Keeps WINDOW_PATHS and settings in sync so the window
+/// is correctly restored on the next launch.
+#[tauri::command]
+fn notify_workspace_opened(window: tauri::Window, path: String) {
+    let label = window.label().to_string();
+    window_paths().insert(label, path.clone());
+    settings::add_open_window(&path);
+    log::info!("[workspace] registered '{}' for window '{}'", path, window.label());
 }
 
 fn open_workspace_window(app: &tauri::AppHandle, path: Option<String>) {
@@ -92,6 +107,38 @@ pub fn run() {
         .manage(app_store)
         .manage(Arc::new(LspManager::new()))
         .setup(|app| {
+            // Bootstrap PATH from the user's login shell so the GUI bundle can find
+            // tools installed via Homebrew, nvm, Volta, npm global, etc.
+            // macOS .app bundles inherit a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+            // which prevents detection of claude, language servers, and other CLI tools.
+            log::info!("[startup] process PATH before bootstrap: {}", std::env::var("PATH").unwrap_or_default());
+            match std::process::Command::new("zsh").args(["-l", "-c", "echo $PATH"]).output() {
+                Ok(output) if output.status.success() => {
+                    if let Ok(shell_path) = String::from_utf8(output.stdout) {
+                        let shell_path = shell_path.trim();
+                        if !shell_path.is_empty() {
+                            log::info!("[startup] login shell PATH: {}", shell_path);
+                            let current = std::env::var("PATH").unwrap_or_default();
+                            let merged = if current.is_empty() {
+                                shell_path.to_string()
+                            } else {
+                                format!("{}:{}", shell_path, current)
+                            };
+                            std::env::set_var("PATH", &merged);
+                            log::info!("[startup] merged PATH set: {}", merged);
+                        } else {
+                            log::warn!("[startup] PATH bootstrap: zsh returned empty PATH");
+                        }
+                    }
+                }
+                Ok(output) => {
+                    log::warn!("[startup] PATH bootstrap: zsh -l exited with status {}", output.status);
+                }
+                Err(e) => {
+                    log::warn!("[startup] PATH bootstrap failed (could not spawn zsh): {}", e);
+                }
+            }
+
             // Start the MCP server so agents can call push_and_create_pr.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -204,8 +251,27 @@ pub fn run() {
                 }
                 tauri::WindowEvent::Destroyed => {
                     let label = window.label().to_string();
-                    if let Some(path) = window_paths().remove(&label) {
-                        settings::remove_open_window(&path);
+                    // Extract the path in its own statement so the MutexGuard is
+                    // dropped immediately. If we used `if let Some(p) = window_paths().remove()`
+                    // the guard would be held for the entire if-block, and the second
+                    // window_paths() call below would deadlock on the same thread.
+                    let path = window_paths().remove(&label);
+                    if let Some(path) = path {
+                        // Remove the workspace from settings only when the user
+                        // explicitly closed it while other workspaces were still open.
+                        // Two cases where we keep it:
+                        //   (a) App is quitting (QUITTING=true) — all workspaces should
+                        //       reopen on the next launch.
+                        //   (b) This was the last open workspace (no others in WINDOW_PATHS
+                        //       after removing this one) — closing the last window, whether
+                        //       via the X button or Cmd+Q, should still reopen it next time.
+                        let quitting = QUITTING.load(Ordering::Relaxed);
+                        let has_other_workspace = window_paths()
+                            .keys()
+                            .any(|k| k.starts_with("workspace-"));
+                        if !quitting && has_other_workspace {
+                            settings::remove_open_window(&path);
+                        }
                     }
                     // Stop any file/git watchers owned by this window.
                     fs::stop_watching_for_window(&label);
@@ -219,6 +285,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            notify_workspace_opened,
             fs::read_directory,
             fs::read_file,
             fs::write_file,
@@ -234,6 +301,8 @@ pub fn run() {
             git::git_status,
             git::git_is_repo,
             git::git_init_repo,
+            git::find_git_context,
+            git::find_git_root_for_file,
             git::git_revert_files,
             git::git_has_remote,
             git::git_add_remote,
@@ -267,6 +336,7 @@ pub fn run() {
             git::stop_git_watching,
             terminal::spawn_terminal,
             terminal::spawn_agent_terminal,
+            terminal::spawn_agent_with_worktree_setup,
             terminal::write_terminal,
             terminal::resize_terminal,
             terminal::get_terminal_backlog,
@@ -301,6 +371,7 @@ pub fn run() {
             checkpoint::apply_agent_file,
             checkpoint::finalize_review,
             checkpoint::list_reviews,
+            worktree::prepare_agent_session,
             worktree::create_worktree,
             worktree::scan_worktree_changes,
             worktree::get_file_from_worktree,
@@ -350,6 +421,13 @@ pub fn run() {
             tapp_commands::tapp_get_ui,
             tapp_commands::tapp_dispatch_action,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                // Mark as quitting before windows are destroyed so the Destroyed
+                // handler knows not to erase open_windows from settings.
+                QUITTING.store(true, Ordering::Relaxed);
+            }
+        });
 }

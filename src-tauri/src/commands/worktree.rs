@@ -64,7 +64,7 @@ pub struct WorktreeInfo {
     pub provider_session_id: Option<String>,
     /// Legacy field - kept for backward compatibility with existing worktree metadata.
     #[serde(default, alias = "claudeSessionId")]
-    claude_session_id: Option<String>,
+    pub(crate) claude_session_id: Option<String>,
 }
 
 impl WorktreeInfo {
@@ -122,7 +122,7 @@ fn tyck_home() -> PathBuf {
     PathBuf::from(home).join(".tyck")
 }
 
-fn worktrees_dir() -> PathBuf {
+pub(crate) fn worktrees_dir() -> PathBuf {
     tyck_home().join("worktrees")
 }
 
@@ -223,7 +223,7 @@ fn is_git_repo(cwd: &str) -> bool {
 }
 
 /// Get the list of untracked files (not ignored) in a git repo.
-fn get_untracked_files(cwd: &str) -> Vec<String> {
+pub(crate) fn get_untracked_files(cwd: &str) -> Vec<String> {
     let output = Command::new("git")
         .args(["ls-files", "--others", "--exclude-standard"])
         .current_dir(cwd)
@@ -241,7 +241,7 @@ fn get_untracked_files(cwd: &str) -> Vec<String> {
 }
 
 /// Get the list of modified (uncommitted) files in a git repo.
-fn get_modified_files(cwd: &str) -> Vec<String> {
+pub(crate) fn get_modified_files(cwd: &str) -> Vec<String> {
     let mut files = Vec::new();
 
     // Staged changes
@@ -277,7 +277,7 @@ fn get_modified_files(cwd: &str) -> Vec<String> {
     files
 }
 
-fn save_worktree_meta(info: &WorktreeInfo) -> Result<(), String> {
+pub(crate) fn save_worktree_meta(info: &WorktreeInfo) -> Result<(), String> {
     let dir = worktrees_dir();
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(info).map_err(|e| e.to_string())?;
@@ -292,6 +292,23 @@ fn load_worktree_meta(session_id: &str) -> Result<WorktreeInfo, String> {
     serde_json::from_str(&data).map_err(|e| e.to_string())
 }
 
+/// Resolve the `git` binary, preferring known install locations before falling
+/// back to PATH. `/usr/bin/git` (Xcode CLT) is the most common macOS location.
+pub(crate) fn find_git() -> String {
+    use super::terminal::resolve_binary;
+    let resolved = resolve_binary("git");
+    if resolved != "git" {
+        return resolved;
+    }
+    // /usr/bin/git is the macOS system git (Xcode CLT) — always check explicitly
+    // since resolve_binary focuses on user-installed tools and skips /usr/bin.
+    if std::path::Path::new("/usr/bin/git").exists() {
+        return "/usr/bin/git".to_string();
+    }
+    log::warn!("[find_git] 'git' not found in any known location; using bare name");
+    "git".to_string()
+}
+
 /// Create a git worktree for an agent session.
 /// The worktree is detached and captures the exact state of the main repo,
 /// including uncommitted changes, to ensure diffs are accurate.
@@ -299,6 +316,9 @@ fn load_worktree_meta(session_id: &str) -> Result<WorktreeInfo, String> {
 pub fn create_worktree(cwd: String, session_id: String, provider_id: Option<String>) -> Result<WorktreeInfo, String> {
     // Validate session_id
     validate_session_id(&session_id)?;
+
+    log::info!("[create_worktree] session={} cwd='{}'", session_id, cwd);
+    log::info!("[create_worktree] PATH={}", std::env::var("PATH").unwrap_or_default());
 
     // Acquire lock to prevent concurrent creation of worktrees
     let _lock = WORKTREE_CREATION_LOCK
@@ -310,6 +330,7 @@ pub fn create_worktree(cwd: String, session_id: String, provider_id: Option<Stri
     if wt_path.exists() {
         // If metadata exists too, return the existing info
         if let Ok(info) = load_worktree_meta(&session_id) {
+            log::info!("[create_worktree] reusing existing worktree at '{}'", wt_path.display());
             return Ok(info);
         }
         // Worktree dir exists but no metadata - clean it up first
@@ -324,7 +345,12 @@ pub fn create_worktree(cwd: String, session_id: String, provider_id: Option<Stri
         );
     }
 
-    fs::create_dir_all(worktrees_dir()).map_err(|e| e.to_string())?;
+    let worktrees = worktrees_dir();
+    log::info!("[create_worktree] worktrees dir: '{}'", worktrees.display());
+    fs::create_dir_all(&worktrees).map_err(|e| format!("Failed to create worktrees dir '{}': {}", worktrees.display(), e))?;
+
+    let git = find_git();
+    log::info!("[create_worktree] using git binary: '{}'", git);
 
     // Capture initial state BEFORE creating worktree
     let initial_untracked = get_untracked_files(&cwd);
@@ -332,11 +358,16 @@ pub fn create_worktree(cwd: String, session_id: String, provider_id: Option<Stri
 
     // Capture the exact current state including uncommitted changes using git stash create.
     // This creates a commit object representing the current state without actually stashing.
-    let stash_output = Command::new("git")
+    let stash_output = Command::new(&git)
         .args(["stash", "create"])
         .current_dir(&cwd)
         .output()
-        .map_err(|e| format!("git stash create failed: {}", e))?;
+        .map_err(|e| format!("git stash create failed (binary='{}'): {}", git, e))?;
+
+    log::info!("[create_worktree] git stash create: exit={} stdout='{}' stderr='{}'",
+        stash_output.status,
+        String::from_utf8_lossy(&stash_output.stdout).trim(),
+        String::from_utf8_lossy(&stash_output.stderr).trim());
 
     let stash_sha = String::from_utf8_lossy(&stash_output.stdout)
         .trim()
@@ -344,14 +375,19 @@ pub fn create_worktree(cwd: String, session_id: String, provider_id: Option<Stri
 
     // If stash_sha is empty, there are no uncommitted changes; use HEAD
     let base_sha = if stash_sha.is_empty() {
-        let head_output = Command::new("git")
+        let head_output = Command::new(&git)
             .args(["rev-parse", "HEAD"])
             .current_dir(&cwd)
             .output()
             .map_err(|e| format!("git rev-parse HEAD failed: {}", e))?;
 
+        log::info!("[create_worktree] git rev-parse HEAD: exit={} sha='{}'",
+            head_output.status,
+            String::from_utf8_lossy(&head_output.stdout).trim());
+
         if !head_output.status.success() {
-            return Err("Not a git repository or no commits yet".to_string());
+            let stderr = String::from_utf8_lossy(&head_output.stderr);
+            return Err(format!("Not a git repository or no commits yet: {}", stderr.trim()));
         }
 
         String::from_utf8_lossy(&head_output.stdout)
@@ -361,8 +397,10 @@ pub fn create_worktree(cwd: String, session_id: String, provider_id: Option<Stri
         stash_sha
     };
 
+    log::info!("[create_worktree] base_sha='{}' wt_path='{}'", base_sha, wt_path.display());
+
     // Create the worktree detached at the base_sha (which includes uncommitted changes if any)
-    let output = Command::new("git")
+    let output = Command::new(&git)
         .args([
             "worktree",
             "add",
@@ -372,18 +410,42 @@ pub fn create_worktree(cwd: String, session_id: String, provider_id: Option<Stri
         ])
         .current_dir(&cwd)
         .output()
-        .map_err(|e| format!("git worktree add failed: {}", e))?;
+        .map_err(|e| format!("git worktree add failed (binary='{}'): {}", git, e))?;
+
+    log::info!("[create_worktree] git worktree add: exit={} stdout='{}' stderr='{}'",
+        output.status,
+        String::from_utf8_lossy(&output.stdout).trim(),
+        String::from_utf8_lossy(&output.stderr).trim());
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("git worktree add failed: {}", stderr));
     }
 
-    // Copy untracked files from main to worktree so the agent has a complete picture
-    copy_untracked_files(&cwd, &wt_path.to_string_lossy())?;
+    // Verify the directory was actually created
+    if !wt_path.exists() {
+        log::error!("[create_worktree] git worktree add exited 0 but '{}' does not exist!", wt_path.display());
+        return Err(format!(
+            "git worktree add reported success but the directory was not created: {}",
+            wt_path.display()
+        ));
+    }
 
-    // Also copy essential ignored files if .worktreeinclude exists
+    log::info!("[create_worktree] worktree created successfully at '{}'", wt_path.display());
+
+    // Copy essential config files (.env etc.) synchronously — agents need these at startup.
     copy_worktreeinclude_files(&cwd, &wt_path.to_string_lossy())?;
+
+    // Copy untracked source files in a background thread. `git ls-files --others` can take
+    // several seconds on large repos because it traverses gitignored directories
+    // (node_modules/, target/, etc.). The agent can start with just tracked files present;
+    // untracked files will appear in the worktree within a few seconds.
+    let cwd_bg = cwd.clone();
+    let wt_bg = wt_path.to_string_lossy().to_string();
+    std::thread::spawn(move || {
+        copy_untracked_files(&cwd_bg, &wt_bg).ok();
+        log::info!("[create_worktree] background untracked-file copy complete for '{}'", wt_bg);
+    });
 
     let now = chrono::Utc::now().to_rfc3339();
     let info = WorktreeInfo {
@@ -403,8 +465,122 @@ pub fn create_worktree(cwd: String, session_id: String, provider_id: Option<Stri
     Ok(info)
 }
 
+/// Result returned by `prepare_agent_session` — contains the pre-computed worktree
+/// path and base SHA so the caller can open the terminal immediately without waiting
+/// for the actual worktree creation.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedSession {
+    pub session_id: String,
+    pub worktree_path: String,
+    pub base_sha: String,
+    /// True when the worktree already exists (e.g. a reused session). In that case the
+    /// caller should use `spawn_agent_terminal` directly — no setup is needed.
+    pub already_exists: bool,
+}
+
+/// Fast pre-flight for agent session creation: computes the base SHA and worktree
+/// path but does NOT run `git worktree add`.  Returns in < 1 s so the frontend can
+/// open the terminal immediately and show progress messages while the heavy work
+/// happens in the background (see `spawn_agent_with_worktree_setup` in terminal.rs).
+#[tauri::command]
+pub fn prepare_agent_session(
+    cwd: String,
+    session_id: String,
+    _provider_id: Option<String>,
+) -> Result<PreparedSession, String> {
+    validate_session_id(&session_id)?;
+    log::info!("[prepare_agent_session] session={} cwd='{}'", session_id, cwd);
+
+    let wt_path = worktree_path(&session_id);
+
+    // Reuse an existing worktree (e.g. same session opened again).
+    if wt_path.exists() {
+        if let Ok(info) = load_worktree_meta(&session_id) {
+            log::info!("[prepare_agent_session] reusing existing worktree at '{}'", wt_path.display());
+            return Ok(PreparedSession {
+                session_id,
+                worktree_path: info.worktree_path,
+                base_sha: info.base_sha,
+                already_exists: true,
+            });
+        }
+        // Dir exists but no metadata — clean up so we can recreate.
+        let _ = fs::remove_dir_all(&wt_path);
+    }
+
+    if is_inside_worktree(Path::new(&cwd)) {
+        return Err(
+            "Cannot create worktree from inside another worktree. Use the main repository."
+                .to_string(),
+        );
+    }
+
+    let git = find_git();
+
+    // git stash create produces a commit SHA that represents the current working tree
+    // (including uncommitted changes) without actually stashing.  If there are no
+    // uncommitted changes it outputs nothing, so we fall back to HEAD.
+    let stash_out = Command::new(&git)
+        .args(["stash", "create"])
+        .current_dir(&cwd)
+        .output()
+        .map_err(|e| format!("git stash create failed (binary='{}'): {}", git, e))?;
+
+    log::info!(
+        "[prepare_agent_session] git stash create: exit={} sha='{}' stderr='{}'",
+        stash_out.status,
+        String::from_utf8_lossy(&stash_out.stdout).trim(),
+        String::from_utf8_lossy(&stash_out.stderr).trim()
+    );
+
+    let stash_sha = String::from_utf8_lossy(&stash_out.stdout)
+        .trim()
+        .to_string();
+
+    let base_sha = if stash_sha.is_empty() {
+        let head_out = Command::new(&git)
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("git rev-parse HEAD failed: {}", e))?;
+
+        log::info!(
+            "[prepare_agent_session] git rev-parse HEAD: exit={} sha='{}'",
+            head_out.status,
+            String::from_utf8_lossy(&head_out.stdout).trim()
+        );
+
+        if !head_out.status.success() {
+            let stderr = String::from_utf8_lossy(&head_out.stderr);
+            return Err(format!(
+                "Not a git repository or no commits yet: {}",
+                stderr.trim()
+            ));
+        }
+        String::from_utf8_lossy(&head_out.stdout)
+            .trim()
+            .to_string()
+    } else {
+        stash_sha
+    };
+
+    log::info!(
+        "[prepare_agent_session] ready — base_sha='{}' wt_path='{}'",
+        base_sha,
+        wt_path.display()
+    );
+
+    Ok(PreparedSession {
+        session_id,
+        worktree_path: wt_path.to_string_lossy().to_string(),
+        base_sha,
+        already_exists: false,
+    })
+}
+
 /// Copy untracked/ignored files that aren't in git but are needed for builds
-fn copy_untracked_files(main_cwd: &str, wt_path: &str) -> Result<(), String> {
+pub(crate) fn copy_untracked_files(main_cwd: &str, wt_path: &str) -> Result<(), String> {
     let output = Command::new("git")
         .args(["ls-files", "--others", "--exclude-standard"])
         .current_dir(main_cwd)
@@ -433,7 +609,7 @@ fn copy_untracked_files(main_cwd: &str, wt_path: &str) -> Result<(), String> {
 }
 
 /// Copy files listed in .worktreeinclude (essential ignored files like .env, credentials)
-fn copy_worktreeinclude_files(main_cwd: &str, wt_path: &str) -> Result<(), String> {
+pub(crate) fn copy_worktreeinclude_files(main_cwd: &str, wt_path: &str) -> Result<(), String> {
     // Check for .worktreeinclude or .tyck/worktreeinclude
     let include_paths = [
         Path::new(main_cwd).join(".worktreeinclude"),

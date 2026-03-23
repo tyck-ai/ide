@@ -226,7 +226,7 @@ export function createGitStore() {
 
 			update(s => ({
 				...s,
-				commits: skip === 0 ? commits : [...s.commits, ...commits],
+				commits: skip === 0 ? commits : [...s.commits, ...commits].slice(0, 500),
 			}));
 		} catch (e) {
 			console.error('Failed to refresh commits:', e);
@@ -546,20 +546,31 @@ export function createGitStore() {
 
 	let unlistenGitChange: UnlistenFn | null = null;
 	let unlistenFsChange: UnlistenFn | null = null;
+	let watchGeneration = 0;
 
 	async function startWatching(path: string) {
+		const gen = ++watchGeneration;
 		await stopWatching();
+		if (gen !== watchGeneration) return;
 		currentPath = path;
 		set({ ...emptyState });
 
 		// Initial refresh
 		await refresh();
+		if (gen !== watchGeneration) return;
+
+		// Not a git repo — no point polling. Will restart when a valid repo is selected.
+		if (!get({ subscribe }).isRepo) {
+			currentPath = null;
+			return;
+		}
 
 		// 1. Watch .git directory for changes (instant updates)
 		const windowLabel = getCurrentWindow().label;
 		try {
 			await invoke('watch_git_directory', { path, windowLabel });
-			unlistenGitChange = await listen<{ reason: string; windowLabel: string }>('git-change', (event) => {
+			if (gen !== watchGeneration) return;
+			const ul = await listen<{ reason: string; windowLabel: string }>('git-change', (event) => {
 				if (event.payload.windowLabel !== windowLabel) return;
 				console.log('[git] Change detected:', event.payload.reason);
 				refresh();
@@ -571,12 +582,15 @@ export function createGitStore() {
 					refreshStashes();
 				}
 			});
+			if (gen !== watchGeneration) { ul(); return; }
+			unlistenGitChange = ul;
 		} catch (e) {
 			console.warn('[git] Failed to start git watcher:', e);
 		}
+		if (gen !== watchGeneration) return;
 
 		// 2. Listen to general filesystem changes (catches file saves)
-		unlistenFsChange = await listen<{ windowLabel: string }>('fs-change', (event) => {
+		const ulFs = await listen<{ windowLabel: string }>('fs-change', (event) => {
 			if (event.payload.windowLabel !== windowLabel) return;
 			// Debounce: only refresh if not already loading
 			const state = get({ subscribe });
@@ -584,6 +598,8 @@ export function createGitStore() {
 				refresh();
 			}
 		});
+		if (gen !== watchGeneration) { ulFs(); return; }
+		unlistenFsChange = ulFs;
 
 		// 3. Fallback poll every 30 seconds (catches external git operations)
 		pollInterval = setInterval(() => refresh(), 30000);

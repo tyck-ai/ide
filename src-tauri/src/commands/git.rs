@@ -40,9 +40,42 @@ fn is_relevant_git_path(path: &std::path::Path) -> bool {
     path_str.contains(".git/stash")
 }
 
+/// Resolve the actual .git *directory* for a path, handling both regular repos
+/// (where .git is a directory) and git worktrees (where .git is a file containing
+/// a "gitdir: <path>" pointer). Returns None if the path is not a git repo at all.
+fn resolve_git_dir(path: &str) -> Option<PathBuf> {
+    let dot_git = PathBuf::from(path).join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    if dot_git.is_file() {
+        // Worktree: .git is a file like "gitdir: /main/.git/worktrees/<name>"
+        if let Ok(content) = std::fs::read_to_string(&dot_git) {
+            if let Some(gitdir) = content.trim().strip_prefix("gitdir: ") {
+                let gitdir_path = PathBuf::from(gitdir.trim());
+                // Prefer the common root .git dir (two levels up from .git/worktrees/<name>)
+                // so that watching refs/ and HEAD works for the whole repo.
+                if let Some(worktrees_dir) = gitdir_path.parent() {
+                    if let Some(main_git) = worktrees_dir.parent() {
+                        if main_git.is_dir() {
+                            return Some(main_git.to_path_buf());
+                        }
+                    }
+                }
+                if gitdir_path.is_dir() {
+                    return Some(gitdir_path);
+                }
+            }
+        }
+    }
+    None
+}
+
 #[tauri::command]
 pub fn git_is_repo(path: String) -> bool {
-    PathBuf::from(&path).join(".git").is_dir()
+    let dot_git = PathBuf::from(&path).join(".git");
+    // .git can be either a directory (regular repo) or a file (git worktree)
+    dot_git.is_dir() || dot_git.is_file()
 }
 
 #[tauri::command]
@@ -64,6 +97,68 @@ pub fn git_init_repo(path: String) -> Result<(), String> {
     run(&["add", "-A"])?;
     run(&["commit", "-m", "Initial commit", "--allow-empty"])?;
     Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubRepo {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitContextResult {
+    pub is_repo: bool,
+    pub sub_repos: Vec<SubRepo>,
+}
+
+/// Walk up from a file path until a .git dir/file is found. Returns the git root.
+/// Used to follow the active file in the git panel.
+#[tauri::command]
+pub fn find_git_root_for_file(file_path: String) -> Option<String> {
+    let mut path = PathBuf::from(&file_path);
+    // Start from the file's parent directory
+    if path.is_file() {
+        path.pop();
+    }
+    loop {
+        let dot_git = path.join(".git");
+        if dot_git.is_dir() || dot_git.is_file() {
+            return Some(path.to_string_lossy().into_owned());
+        }
+        if !path.pop() {
+            return None;
+        }
+    }
+}
+
+/// Check whether `cwd` is a git repo. If not, scan one level deep for sub-repos.
+/// Used by the new-session flow to offer a project picker or git-init prompt.
+#[tauri::command]
+pub fn find_git_context(cwd: String) -> GitContextResult {
+    let path = PathBuf::from(&cwd);
+    let dot_git = path.join(".git");
+    if dot_git.is_dir() || dot_git.is_file() {
+        return GitContextResult { is_repo: true, sub_repos: vec![] };
+    }
+
+    let mut sub_repos: Vec<SubRepo> = std::fs::read_dir(&path)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let p = entry.path();
+            if !p.is_dir() { return None; }
+            let dg = p.join(".git");
+            if !dg.is_dir() && !dg.is_file() { return None; }
+            let name = p.file_name()?.to_str()?.to_string();
+            Some(SubRepo { name, path: p.to_string_lossy().into_owned() })
+        })
+        .collect();
+
+    sub_repos.sort_by(|a, b| a.name.cmp(&b.name));
+    GitContextResult { is_repo: false, sub_repos }
 }
 
 /// Revert specific files on a branch to their base state (undo agent changes).
@@ -189,10 +284,9 @@ pub fn gh_create_pr(path: String, title: String, body: String, base: String, hea
 
 #[tauri::command]
 pub fn watch_git_directory(app: AppHandle, path: String, window_label: String) -> Result<(), String> {
-    let git_path = PathBuf::from(&path).join(".git");
-    if !git_path.is_dir() {
-        return Err("Not a git repository".to_string());
-    }
+    let git_path = resolve_git_dir(&path)
+        .ok_or_else(|| "Not a git repository".to_string())?;
+    log::info!("[watch_git_directory] watching '{}' (resolved git dir: {})", path, git_path.display());
 
     // Stop any existing watcher for this window.
     {

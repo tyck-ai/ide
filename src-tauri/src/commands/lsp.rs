@@ -18,6 +18,7 @@ struct LspServer {
     language: String,
     stdin: Arc<Mutex<ChildStdin>>,
     child: Arc<Mutex<Child>>,
+    abort_handles: Vec<tokio::task::AbortHandle>,
 }
 
 pub struct LspManager {
@@ -173,22 +174,39 @@ fn install_hint(language: &str) -> String {
 
 /// Find a binary by checking common install dirs (via resolve_binary) then PATH.
 fn find_binary(name: &str) -> Option<String> {
-    // resolve_binary searches /usr/local/bin, homebrew, ~/.cargo/bin, etc.
+    // resolve_binary searches /usr/local/bin, homebrew, ~/.cargo/bin, nvm, volta, etc.
     let resolved = resolve_binary(name);
     if resolved != name {
         return Some(resolved);
     }
 
-    // Fall back to scanning PATH directories (split_paths is OS-aware: ':' on Unix, ';' on Windows)
+    // Scan the process PATH (augmented at startup from the login shell).
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path_var) {
             let candidate = dir.join(name);
             if candidate.exists() {
-                return Some(candidate.to_string_lossy().to_string());
+                let found = candidate.to_string_lossy().to_string();
+                log::info!("[find_binary] '{}' found via PATH scan: {}", name, found);
+                return Some(found);
             }
         }
     }
 
+    // Last resort: ask a login shell so we catch anything the process PATH missed.
+    if let Ok(output) = std::process::Command::new("zsh")
+        .args(["-l", "-c", &format!("which {} 2>/dev/null", name)])
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() && std::path::Path::new(&path).exists() {
+                log::info!("[find_binary] '{}' found via shell fallback: {}", name, path);
+                return Some(path);
+            }
+        }
+    }
+
+    log::warn!("[find_binary] '{}' not found anywhere", name);
     None
 }
 
@@ -277,10 +295,12 @@ pub async fn lsp_start(
     let stdin = child.stdin.take().ok_or("Failed to acquire stdin handle")?;
     let stdout = child.stdout.take().ok_or("Failed to acquire stdout handle")?;
 
+    let mut abort_handles = Vec::new();
+
     // Log stderr lines — critical for diagnosing server crashes and config errors
     if let Some(stderr) = child.stderr.take() {
         let lang_for_log = language.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut reader = BufReader::new(stderr);
             let mut line = String::new();
             loop {
@@ -296,6 +316,7 @@ pub async fn lsp_start(
                 }
             }
         });
+        abort_handles.push(handle.abort_handle());
     }
 
     let server_id = uuid::Uuid::new_v4().to_string();
@@ -303,7 +324,7 @@ pub async fn lsp_start(
 
     // Background task: stream stdout frames → Tauri Channel
     let app_handle = app.clone();
-    tokio::spawn(async move {
+    let stdout_handle = tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
         loop {
             match read_lsp_message(&mut reader).await {
@@ -322,12 +343,14 @@ pub async fn lsp_start(
         let _ = app_handle.emit(&format!("lsp-server-closed-{sid}"), ());
         log::info!("[lsp:{sid}] server process exited");
     });
+    abort_handles.push(stdout_handle.abort_handle());
 
     let server = LspServer {
         id: server_id.clone(),
         language: language.clone(),
         stdin: Arc::new(Mutex::new(stdin)),
         child: Arc::new(Mutex::new(child)),
+        abort_handles,
     };
 
     state.servers.write().await.insert(server_id.clone(), server);
@@ -361,6 +384,7 @@ pub async fn lsp_stop(
 ) -> Result<(), String> {
     let mut servers = state.servers.write().await;
     if let Some(server) = servers.remove(&server_id) {
+        for handle in server.abort_handles { handle.abort(); }
         let mut child = server.child.lock().await;
         child.kill().await.ok();
         log::info!("[lsp] stopped server (id={server_id})");
@@ -375,6 +399,7 @@ pub async fn lsp_stop_all(
 ) -> Result<(), String> {
     let mut servers = state.servers.write().await;
     for (id, server) in servers.drain() {
+        for handle in server.abort_handles { handle.abort(); }
         let mut child = server.child.lock().await;
         child.kill().await.ok();
         log::info!("[lsp] stopped server (id={id})");
@@ -405,6 +430,7 @@ pub async fn lsp_check_binary(language: String) -> Result<LspBinaryStatus, Strin
 
     let path = find_binary(config.binary);
     let found = path.is_some();
+    log::info!("[lsp_check_binary] language='{}' binary='{}': found={}, path={:?}", language, config.binary, found, path);
     let hint = if found {
         None
     } else {

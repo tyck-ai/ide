@@ -8,6 +8,7 @@ import { checkpoint } from './checkpoint';
 import { sessionReview } from './sessionReview';
 import { isAgentMode } from './settings';
 import { activeSessionId } from './activeSession';
+import { trackSessionSetup } from './sessionSetup';
 import { listen } from '@tauri-apps/api/event';
 
 export { activeSessionId } from './activeSession';
@@ -74,7 +75,7 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	// When resuming, try to find the original worktree that was used for this session
 	let id: string;
 	let existingWorktreePath: string | null = null;
-	
+
 	if (resumeSessionId && cwd) {
 		try {
 			const result = await invoke<[string, string] | null>('find_worktree_for_resume', {
@@ -92,6 +93,14 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 		}
 	} else {
 		id = crypto.randomUUID();
+	}
+
+	// Clean up any leftover listeners from a previous spawn of this session ID
+	// (happens when resuming a session that exited without a formal close)
+	const staleUnlistens = sessionUnlistens.get(id);
+	if (staleUnlistens) {
+		for (const unlisten of staleUnlistens) unlisten();
+		sessionUnlistens.delete(id);
 	}
 
 	// Initialize tyck project structure (provider-specific setup handled in Rust)
@@ -141,28 +150,42 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 
 	// Create worktree for agent isolation (only when review mode is enabled and cwd is a git repo)
 	let agentCwd = cwd;
+	// Set when a brand-new worktree needs background setup (non-blocking spawn).
+	let pendingSetup: { worktreePath: string; baseSha: string } | null = null;
 
 	if (cwd && agentMode) {
 		try {
-			// If we already found an existing worktree, use it directly
+			// If we already found an existing worktree, use it directly.
 			if (existingWorktreePath) {
 				agentCwd = existingWorktreePath;
 				await sessionReview.registerSession(id, cwd, existingWorktreePath);
 				await sessionReview.refreshDiffs(id);
 			} else {
-				// Create new worktree
-				const wtInfo = await invoke<{ worktreePath: string }>('create_worktree', {
+				// Fast prepare (<1 s): compute base SHA and worktree path without
+				// running git worktree add.  The heavy work happens in the background.
+				const prepared = await invoke<{
+					sessionId: string;
+					worktreePath: string;
+					baseSha: string;
+					alreadyExists: boolean;
+				}>('prepare_agent_session', {
 					cwd,
 					sessionId: id,
 					providerId: provider.id,
 				});
-				agentCwd = wtInfo.worktreePath;
-				await sessionReview.registerSession(id, cwd, wtInfo.worktreePath);
-				await sessionReview.refreshDiffs(id);
+				agentCwd = prepared.worktreePath;
+				await sessionReview.registerSession(id, cwd, prepared.worktreePath);
+				if (prepared.alreadyExists) {
+					// Worktree already set up — refresh diffs immediately.
+					await sessionReview.refreshDiffs(id);
+				} else {
+					// Worktree will be created in the background; refresh when ready.
+					pendingSetup = { worktreePath: prepared.worktreePath, baseSha: prepared.baseSha };
+				}
 			}
 
 			// When resuming a session, symlink the original session file to the new worktree's
-			// project directory so Claude Code can find it
+			// project directory so Claude Code can find it.
 			if (resumeSessionId && resumeSessionPath) {
 				try {
 					await invoke('prepare_resume_session', {
@@ -171,19 +194,19 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 						newCwd: agentCwd,
 						sessionId: resumeSessionId,
 					});
-					
+
 					// Record the association between this worktree and the provider session
-					// so we can find it later when resuming again
+					// so we can find it later when resuming again.
 					await invoke('set_worktree_provider_session', {
 						worktreeSessionId: id,
 						providerSessionId: resumeSessionId,
 					});
 				} catch {
-					// Session file symlink failed, continue anyway
+					// Session file symlink failed, continue anyway.
 				}
 			}
 		} catch {
-			// Fallback: use old checkpoint system
+			// Fallback: use old checkpoint system.
 			try {
 				await checkpoint.createCheckpoint(cwd, id);
 			} catch (e2) {
@@ -192,13 +215,47 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 		}
 	}
 
-	await invoke('spawn_agent_terminal', {
-		id,
-		binary: provider.binary,
-		args,
-		env,
-		cwd: agentCwd,
-	});
+	if (pendingSetup) {
+		// Register setup tracking before invoking the command so the listener
+		// is ready before the Rust background thread emits its first step event.
+		const setupCleanup = await trackSessionSetup(id);
+		const setupUnlistens = sessionUnlistens.get(id) ?? [];
+		setupUnlistens.push(setupCleanup);
+		sessionUnlistens.set(id, setupUnlistens);
+
+		// Listen for worktree-ready before spawning so we never miss the event.
+		// Awaited so the unlisten is tracked before invoke() can throw.
+		const worktreeReadyUnlisten = await listen(`worktree-ready-${id}`, async () => {
+			try {
+				await sessionReview.refreshDiffs(id);
+			} catch {
+				// non-critical
+			}
+		});
+		const worktreeReadyList = sessionUnlistens.get(id) ?? [];
+		worktreeReadyList.push(worktreeReadyUnlisten);
+		sessionUnlistens.set(id, worktreeReadyList);
+
+		// Non-blocking: terminal opens immediately, worktree setup runs in background.
+		await invoke('spawn_agent_with_worktree_setup', {
+			id,
+			cwd,
+			worktreePath: pendingSetup.worktreePath,
+			baseSha: pendingSetup.baseSha,
+			providerId: provider.id,
+			binary: provider.binary,
+			args,
+			env,
+		});
+	} else {
+		await invoke('spawn_agent_terminal', {
+			id,
+			binary: provider.binary,
+			args,
+			env,
+			cwd: agentCwd,
+		});
+	}
 
 	// For new sessions, start background discovery of the provider's session ID
 	// This runs in the backend and survives frontend crashes
@@ -322,6 +379,9 @@ export async function resumeAgent(sessionId: string) {
 export async function closeAgentSession(id: string): Promise<void> {
 	// Clean up session UI state
 	clearSessionState(id);
+
+	// Clean up pause-tracking state
+	devEditsWhilePaused.delete(id);
 
 	// Clean up event listeners for this session
 	const unlistens = sessionUnlistens.get(id);

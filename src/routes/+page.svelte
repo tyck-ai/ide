@@ -26,15 +26,18 @@
 	import { isAgentMode } from '$lib/stores/settings';
 	import { activeSessionId } from '$lib/stores/activeSession';
 	import { agentModeSessions } from '$lib/stores/agentTerminal';
+	import { sessionSetups } from '$lib/stores/sessionSetup';
 	import NewSessionModal from '$lib/components/NewSessionModal.svelte';
+	import SessionSetupOverlay from '$lib/components/SessionSetupOverlay.svelte';
 	import { TappContainer } from '$lib/components/tapp';
-	import { projectRoot, resetWorkspace } from '$lib/stores/editor';
+	import { projectRoot, resetWorkspace, activeFilePath } from '$lib/stores/editor';
 	import { showContext, showInsight, showSettings, showGitView, showBranchSwitcher, showQuickCommit, showAppLauncher, pendingInstall, gitViewTab, gitAgentSessionId, showSessionSidebar, showQuickOpen, quickOpenMode, contextZoneTab, showProblems } from '$lib/stores/layout';
 	import { activeApp, tapp } from '$lib/stores/tapp';
 	import { toggleTerminal, terminalVisible } from '$lib/stores/terminal';
 	import { matchesBinding } from '$lib/stores/keybindings';
 	import { startAgentStatusListener, stopAgentStatusListener } from '$lib/stores/agentStatus';
-	import { startGitPoller, git } from '$lib/stores/git';
+	import { git } from '$lib/stores/git';
+	import { resetGitRootForWorkspace, followActiveFile } from '$lib/stores/activeGitRoot';
 	import '$lib/stores/agentGit'; // bootstrap agent git auto-tracking
 	import { checkProjectOnOpen } from '$lib/lsp/serverDiscovery';
 	import { lspClientManager } from '$lib/lsp/LspClientManager';
@@ -52,6 +55,11 @@
 	const showContextZone = $derived($showContext && (!$isAgentMode || !!$activeSessionId));
 	// Show the unified welcome view when agent mode has no sessions yet
 	const agentWelcome = $derived($isAgentMode && $agentModeSessions.length === 0);
+	// Show fullscreen setup overlay when the active agent-mode session is being initialized
+	const activeSetup = $derived($activeSessionId ? $sessionSetups.get($activeSessionId) : null);
+	const showSetupOverlay = $derived(
+		$isAgentMode && !!activeSetup && activeSetup.step !== 'started'
+	);
 	let unlistenFns: (() => void)[] = [];
 	let contextWidth = $state(240);
 	let appWidth = $state(300);
@@ -159,17 +167,24 @@
 		}
 	}
 
+	// Follow active file in the git panel (auto-switches git root to the file's repo)
+	$effect(() => { followActiveFile($activeFilePath); });
+
 	async function setWorkspace(cwd: string) {
 		// Stop any servers from the previous workspace before switching.
 		lspClientManager.stopAll().catch((e) => log.warn('[setWorkspace] lspClientManager.stopAll', e));
 		resetWorkspace();
 		projectRoot.set(cwd);
-		startGitPoller(cwd);
+		resetGitRootForWorkspace(cwd);
 		// Non-blocking: detect project languages and warn about missing servers
 		checkProjectOnOpen(cwd).catch((e) => log.warn('[setWorkspace] checkProjectOnOpen', e));
 		// Update window title to reflect the active project.
 		const folderName = cwd.split('/').pop() ?? cwd;
 		getCurrentWindow().setTitle(`${folderName} — tyck`).catch((e) => log.warn('[setWorkspace] setTitle', e));
+		// Tell Rust about this workspace so it can persist it for restore on next launch.
+		// This is needed when the user opens a folder from the welcome screen, since
+		// that path never goes through open_workspace_window() on the Rust side.
+		invoke('notify_workspace_opened', { path: cwd }).catch((e) => log.warn('[setWorkspace] notify_workspace_opened', e));
 	}
 
 	async function openFolder() {
@@ -281,13 +296,17 @@
 		{#if $showSessionSidebar && $isAgentMode}
 			<SessionSidebar onClose={() => showSessionSidebar.set(false)} />
 		{/if}
-		<div class="main-row" style="grid-template-columns: {
-			$activeApp
-				? $activeApp.layout === 'sidebar'
-					? `${appWidth}px 4px 1fr 4px ${$showInsight ? insightWidth : 0}px`
-					: `1fr 4px ${$showInsight ? insightWidth : 0}px`
-				: `${showContextZone ? `${contextWidth}px 4px ` : ''}1fr 4px ${$showInsight ? insightWidth : 0}px`
-		}">
+		<div class="main-content">
+			{#if showSetupOverlay && $activeSessionId}
+				<SessionSetupOverlay sessionId={$activeSessionId} />
+			{/if}
+			<div class="main-row" class:zones-hidden={showSetupOverlay} style="grid-template-columns: {
+				$activeApp
+					? $activeApp.layout === 'sidebar'
+						? `${appWidth}px 4px 1fr 4px ${$showInsight ? insightWidth : 0}px`
+						: `1fr 4px ${$showInsight ? insightWidth : 0}px`
+					: `${showContextZone ? `${contextWidth}px 4px ` : ''}1fr 4px ${$showInsight ? insightWidth : 0}px`
+			}">
 			{#if $activeApp && $activeApp.layout === 'sidebar'}
 				<div class="zone tapp-zone">
 					<TappContainer appId={$activeApp.id} layout="sidebar" onClose={closeActiveApp} />
@@ -326,7 +345,8 @@
 			</div>
 
 			<TerminalPanel />
-		</div>
+			</div><!-- end main-row -->
+		</div><!-- end main-content -->
 		{/if}
 		</div>
 
@@ -413,11 +433,22 @@
 		display: flex;
 		overflow: hidden;
 	}
+	.main-content {
+		flex: 1;
+		position: relative;
+		overflow: hidden;
+		display: flex;
+	}
 	.main-row {
 		flex: 1;
 		display: grid;
 		overflow: hidden;
 		position: relative;
+		transition: opacity 0.25s ease;
+	}
+	.zones-hidden {
+		opacity: 0;
+		pointer-events: none;
 	}
 	.command-row {
 		flex-shrink: 0;

@@ -1,51 +1,18 @@
 <script lang="ts">
-	import { invoke } from '@tauri-apps/api/core';
-	import { get } from 'svelte/store';
-	import { activeFilePath, selection, cursorLine, projectRoot } from '$lib/stores/editor';
+	import { activeFilePath, selection, cursorLine } from '$lib/stores/editor';
 	import { terminalVisible, toggleTerminal } from '$lib/stores/terminal';
 	import { activeSessionId } from '$lib/stores/agentTerminal';
 	import { isAgentMode, isDevMode, settings } from '$lib/stores/settings';
 	import { switchToMode } from '$lib/stores/modeSwitch';
-	import { startGitPoller } from '$lib/stores/git';
-	import { toast } from '$lib/stores/toast';
 	import { log } from '$lib/log';
 
 	let showDropdown = $state(false);
-	let showGitInit = $state(false);
-	let initializingGit = $state(false);
 
 	async function selectMode(mode: 'dev' | 'agent') {
 		showDropdown = false;
 		if (mode === $settings.workspaceMode) return;
-
-		if (mode === 'agent') {
-			const cwd = get(projectRoot);
-			if (cwd) {
-				const isRepo = await invoke<boolean>('git_is_repo', { path: cwd });
-				if (!isRepo) {
-					showGitInit = true;
-					return;
-				}
-			}
-		}
-
+		// Git check is deferred to new-session time so the picker can handle it.
 		await switchToMode(mode);
-	}
-
-	async function initGitAndSwitch() {
-		const cwd = get(projectRoot);
-		if (!cwd) return;
-		initializingGit = true;
-		try {
-			await invoke('git_init_repo', { path: cwd });
-			toast.success('Git initialized. Agent Mode ready.');
-			startGitPoller(cwd);
-			await switchToMode('agent');
-		} catch (e) {
-			toast.error(`Failed to initialize git: ${e}`);
-		}
-		initializingGit = false;
-		showGitInit = false;
 	}
 
 	function injectContext() {
@@ -132,25 +99,6 @@
 	</button>
 </div>
 
-{#if showGitInit}
-	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div class="modal-backdrop" onclick={() => showGitInit = false}>
-		<div class="modal" onclick={(e) => e.stopPropagation()}>
-			<div class="modal-title">Agent Mode requires git</div>
-			<div class="modal-text">
-				This project isn't a git repository. Initialize git to use Agent Mode?
-				<br /><br />
-				This will run <code>git init</code> and create an initial commit with all existing files.
-			</div>
-			<div class="modal-actions">
-				<button class="modal-btn cancel" onclick={() => showGitInit = false}>Stay in Dev Mode</button>
-				<button class="modal-btn confirm" onclick={initGitAndSwitch} disabled={initializingGit}>
-					{initializingGit ? 'Initializing...' : 'Initialize Git'}
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
 
 <style>
 	.command-rail {
@@ -270,29 +218,4 @@
 	.dropdown-info { display: flex; flex-direction: column; gap: 2px; }
 	.dropdown-label { font-size: 13px; font-weight: 600; }
 	.dropdown-desc { font-size: 11px; color: var(--color-text-subtle); line-height: 1.4; }
-
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0,0,0,0.5);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 300;
-	}
-	.modal {
-		background: var(--color-surface);
-		border: 1px solid var(--color-border);
-		border-radius: 10px;
-		padding: 24px;
-		max-width: 380px;
-		width: 90%;
-	}
-	.modal-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
-	.modal-text { font-size: 13px; color: var(--color-text-secondary); line-height: 1.5; margin-bottom: 20px; }
-	.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
-	.modal-btn { padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; }
-	.modal-btn.cancel { background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text); }
-	.modal-btn.confirm { background: var(--color-warning, #fbbf24); border: none; color: #1a1a1a; }
-	.modal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
