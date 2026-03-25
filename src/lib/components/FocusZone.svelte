@@ -482,7 +482,9 @@
 		if (!monaco) return;
 
 		if (review && rel && inReview) {
-			const key = `${review.sessionId}:${rel}`;
+			// Include scanSeq in the key so repeated edits to the same file
+			// (same additions/deletions counts but changed content) still trigger a reload.
+			const key = `${review.sessionId}:${rel}:${review.scanSeq}`;
 			const fileIsConflict = review.fileDecisions.get(rel) === 'conflict';
 			if (fileIsConflict) {
 				// Always re-show merge editor on conflict (state may have changed)
@@ -490,7 +492,6 @@
 				showMergeEditor(review.sessionId, rel);
 				currentDiffKey = key;
 			} else if (key !== currentDiffKey) {
-				// Only update models when file changes — not on every store update
 				currentDiffKey = key;
 				hideMergeEditor();
 				showDiffEditor(review.sessionId, rel);

@@ -176,6 +176,6 @@
 		padding: 4px 8px;
 	}
 	.agent-terminal :global(.xterm-viewport) {
-		overflow-y: auto !important;
+		overflow-y: hidden !important;
 	}
 </style>

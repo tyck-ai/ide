@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen } from '@tauri-apps/api/event';
-	import { projectRoot } from '$lib/stores/editor';
+	import { activeWorkingDirectory } from '$lib/stores/editor';
 	import { activeTheme, getXtermTheme } from '$lib/themes';
 	import { activeSessionId, focusAgentTerminal } from '$lib/stores/activeSession';
 	import { get } from 'svelte/store';
@@ -61,9 +61,9 @@
 
 		setTimeout(safeFit, 100);
 
-		// Get project root for cwd
+		// Use the active working directory (worktree path in agent mode, projectRoot otherwise)
 		let cwd: string | null = null;
-		projectRoot.subscribe(v => cwd = v)();
+		activeWorkingDirectory.subscribe(v => cwd = v)();
 
 		// Spawn PTY
 		try {
@@ -134,6 +134,6 @@
 		padding: 4px 8px;
 	}
 	.terminal-wrapper :global(.xterm-viewport) {
-		overflow-y: auto !important;
+		overflow-y: hidden !important;
 	}
 </style>

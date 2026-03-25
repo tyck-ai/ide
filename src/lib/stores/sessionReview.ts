@@ -42,6 +42,9 @@ export interface SessionReviewState {
 	conflicts: Map<string, string>;
 	/** Files that have been processed (accepted/rejected) - excluded from future polling */
 	processedFiles: Set<string>;
+	/** Increments on every completed scan so consumers can detect content changes
+	 *  even when additions/deletions counts happen to be identical. */
+	scanSeq: number;
 
 	reviewMode: boolean;
 	selectedFile: string | null;
@@ -53,18 +56,14 @@ function createSessionReviewStore() {
 	const sessions = writable<Map<string, SessionReviewState>>(new Map());
 	const { subscribe, update } = sessions;
 
-	const fsUnlistens = new Map<string, () => void>();
 	const refreshInFlight = new Set<string>();
+	/** Sessions that requested a refresh while one was in-flight; triggers a follow-up. */
+	const refreshPending = new Set<string>();
 
 	/** Paths (relative to worktree) saved by the developer — excluded from review. */
 	const devEditedPaths = new Map<string, Set<string>>();
 
 	function cleanupSession(sessionId: string) {
-		const unlisten = fsUnlistens.get(sessionId);
-		if (unlisten) {
-			unlisten();
-			fsUnlistens.delete(sessionId);
-		}
 		devEditedPaths.delete(sessionId);
 	}
 
@@ -86,6 +85,7 @@ function createSessionReviewStore() {
 				fileDecisions: new Map(),
 				conflicts: new Map(),
 				processedFiles: new Set(),
+				scanSeq: 0,
 				reviewMode: false,
 				selectedFile: null,
 				error: null,
@@ -93,19 +93,8 @@ function createSessionReviewStore() {
 			return next;
 		});
 
-		// Listen for fs-change events — fires immediately when agent writes a file.
-		// Filter by window label: Tauri v2 listen() is global across all windows.
-		try {
-			const myLabel = getCurrentWindow().label;
-			const unlisten = await listen<{ windowLabel: string }>('fs-change', (event) => {
-				if (event.payload.windowLabel !== myLabel) return;
-				refreshDiffs(sessionId);
-			});
-			fsUnlistens.set(sessionId, unlisten);
-		} catch { /* non-critical */ }
-
 		await refreshDiffs(sessionId);
-		
+
 		// Auto-enter review mode when agent mode is on
 		if (agentMode) {
 			await enterReviewMode(sessionId);
@@ -127,15 +116,15 @@ function createSessionReviewStore() {
 
 	async function refreshDiffs(sessionId: string) {
 		if (refreshInFlight.has(sessionId)) {
-			console.log('[sessionReview] refreshDiffs skipped - already in flight for', sessionId);
+			refreshPending.add(sessionId);
 			return;
 		}
 		if (!getSession(sessionId)) {
-			console.log('[sessionReview] refreshDiffs skipped - no session for', sessionId);
 			return;
 		}
 
 		refreshInFlight.add(sessionId);
+		refreshPending.delete(sessionId);
 		try {
 			const allDiffs = await invoke<WorktreeFileDiff[]>('scan_worktree_changes', {
 				sessionId,
@@ -171,8 +160,16 @@ function createSessionReviewStore() {
 					}
 				}
 
-				// Skip update if diffs haven't changed and no conflict resolutions detected
-				if (diffsEqual(diffs, s.diffs) && conflicts.size === s.conflicts.size) return map;
+				// Always bump scanSeq so FocusZone can detect content-only changes
+				// (same additions/deletions counts but different file content).
+				const scanSeq = s.scanSeq + 1;
+
+				// Skip full diff/decision update if metadata is unchanged and no conflict resolutions.
+				// scanSeq still advances so the diff view re-reads fresh content.
+				if (diffsEqual(diffs, s.diffs) && conflicts.size === s.conflicts.size) {
+					next.set(sessionId, { ...s, scanSeq, error: null });
+					return next;
+				}
 
 				// Add new files as pending
 				for (const diff of diffs) {
@@ -188,7 +185,7 @@ function createSessionReviewStore() {
 					}
 				}
 
-				next.set(sessionId, { ...s, diffs, fileDecisions: decisions, conflicts, error: null });
+				next.set(sessionId, { ...s, diffs, fileDecisions: decisions, conflicts, scanSeq, error: null });
 				return next;
 			});
 		} catch (e) {
@@ -202,6 +199,10 @@ function createSessionReviewStore() {
 			});
 		} finally {
 			refreshInFlight.delete(sessionId);
+			if (refreshPending.has(sessionId)) {
+				refreshPending.delete(sessionId);
+				refreshDiffs(sessionId);
+			}
 		}
 	}
 
@@ -501,9 +502,64 @@ function createSessionReviewStore() {
 		devEditedPaths.get(sessionId)!.add(relativePath);
 	}
 
+
+	// ── View-based watcher ──────────────────────────────────────────────────────
+	// The fs watcher is active for exactly as long as a session is on screen.
+	// Starts when the user opens a session, stops when they navigate away,
+	// switches paths when they switch sessions.
+
+	let activeWatcher: { unlisten: () => void } | null = null;
+	let watcherGen = 0;
+
+	const activeWorktreePath = derived(
+		[sessions, activeSessionId],
+		([$sessions, $sid]) => ($sid ? ($sessions.get($sid)?.worktreePath ?? null) : null)
+	);
+
+	async function startWatcher(worktreePath: string) {
+		const gen = ++watcherGen;
+
+		// Stop previous watcher before starting a new one
+		if (activeWatcher) { activeWatcher.unlisten(); activeWatcher = null; }
+		invoke('stop_watching', { windowLabel: getCurrentWindow().label }).catch(() => {});
+
+		const myLabel = getCurrentWindow().label;
+		try {
+			await invoke('watch_directory', { path: worktreePath, windowLabel: myLabel });
+			if (gen !== watcherGen) return;
+			const unlisten = await listen<{ windowLabel: string }>('fs-change', (event) => {
+				if (event.payload.windowLabel !== myLabel) return;
+				const sid = get(activeSessionId);
+				if (sid) refreshDiffs(sid);
+			});
+			if (gen !== watcherGen) { unlisten(); return; }
+			activeWatcher = { unlisten };
+		} catch { /* path doesn't exist yet (pending worktree setup) — reactivateWatcher() will retry */ }
+	}
+
+	activeWorktreePath.subscribe(async (worktreePath) => {
+		if (!worktreePath) {
+			if (activeWatcher) { activeWatcher.unlisten(); activeWatcher = null; }
+			invoke('stop_watching', { windowLabel: getCurrentWindow().label }).catch(() => {});
+			return;
+		}
+		await startWatcher(worktreePath);
+	});
+
+	/** Called by agentTerminal when the worktree directory is ready on disk.
+	 *  Re-registers watch_directory which may have failed during initial setup
+	 *  because the directory didn't exist yet. */
+	async function reactivateWatcher() {
+		const sid = get(activeSessionId);
+		if (!sid) return;
+		const worktreePath = get(sessions).get(sid)?.worktreePath;
+		if (worktreePath) await startWatcher(worktreePath);
+	}
+
 	return {
 		subscribe,
 		registerSession,
+		reactivateWatcher,
 		refreshDiffs,
 		acceptFile,
 		rejectFile,

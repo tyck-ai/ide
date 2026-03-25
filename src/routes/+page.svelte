@@ -344,7 +344,7 @@
 				<InsightZone />
 			</div>
 
-			<TerminalPanel />
+			<TerminalPanel rightOffset={$showInsight ? insightWidth + 4 : 0} />
 			</div><!-- end main-row -->
 		</div><!-- end main-content -->
 		{/if}
