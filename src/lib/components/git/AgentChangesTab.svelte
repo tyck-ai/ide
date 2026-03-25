@@ -35,7 +35,12 @@
 
 	onDestroy(() => {
 		localGit.stopWatching();
-		if (diffEditor) diffEditor.dispose();
+		if (diffEditor) {
+			const model = diffEditor.getModel();
+			model?.original?.dispose();
+			model?.modified?.dispose();
+			diffEditor.dispose();
+		}
 	});
 
 	// Load diff whenever both the selected file and editor are ready
@@ -71,17 +76,28 @@
 
 	async function loadDiff(path: string) {
 		try {
-			const original = await localGit.getFileAtHead(path) ?? '';
+			// Read original from the main workspace (pre-agent state).
+			// localGit.getFileAtHead would return the agent's committed version when
+			// the agent has committed to the worktree branch, producing an empty diff.
+			const mainCwd = $sessionReview.get(session.id)?.mainCwd ?? '';
+			const original = mainCwd
+				? await invoke<string>('read_file', { path: `${mainCwd}/${path}` }).catch(() => '')
+				: await localGit.getFileAtHead(path) ?? '';
 			const modified = await invoke<string>('read_file', {
 				path: `${session.worktreePath}/${path}`,
 			}).catch(() => '');
 
 			if (diffEditor) {
 				const monaco = await import('monaco-editor');
+				const originalUri = monaco.Uri.parse(`agent-orig://${path}`);
+				const modifiedUri = monaco.Uri.parse(`agent-mod://${path}`);
+				// Dispose stale models left in registry from a previous navigation
+				monaco.editor.getModel(originalUri)?.dispose();
+				monaco.editor.getModel(modifiedUri)?.dispose();
 				const oldModel = diffEditor.getModel();
 				diffEditor.setModel({
-					original: monaco.editor.createModel(original, undefined, monaco.Uri.parse(`agent-orig://${path}`)),
-					modified: monaco.editor.createModel(modified, undefined, monaco.Uri.parse(`agent-mod://${path}`)),
+					original: monaco.editor.createModel(original, undefined, originalUri),
+					modified: monaco.editor.createModel(modified, undefined, modifiedUri),
 				});
 				oldModel?.original?.dispose();
 				oldModel?.modified?.dispose();

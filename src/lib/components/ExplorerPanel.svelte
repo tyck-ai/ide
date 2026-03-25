@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { get } from 'svelte/store';
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { openFileInEditor, activeWorkingDirectory } from '$lib/stores/editor';
+	import { isAgentMode } from '$lib/stores/settings';
 	import { git } from '$lib/stores/git';
 	import { contextZoneTab } from '$lib/stores/layout';
 	import { fileIndex, buildFileIndex } from '$lib/stores/fileIndex';
@@ -106,7 +108,10 @@
 	async function stopWatching() {
 		if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = null; }
 		if (unlisten) { unlisten(); unlisten = null; }
-		try { await invoke('stop_watching', { windowLabel: getCurrentWindow().label }); } catch { /* ignore */ }
+		// In agent mode, sessionReview owns the watch_directory registration — don't kill it.
+		if (!get(isAgentMode)) {
+			try { await invoke('stop_watching', { windowLabel: getCurrentWindow().label }); } catch { /* ignore */ }
+		}
 	}
 
 	onDestroy(() => { unsubWorkDir(); stopWatching(); });

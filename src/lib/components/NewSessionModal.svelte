@@ -30,6 +30,7 @@
 	let sessionName = $state(pickSessionName(usedNames));
 	let selectedProvider = $state($activeProviderId || $agentProviders[0]?.id || '');
 	let instructions = $state('');
+	let branchName = $state('');
 	let starting = $state(false);
 	let error = $state<string | null>(null);
 
@@ -97,7 +98,8 @@
 				undefined,
 				selectedProvider,
 				undefined,
-				sessionName.trim() || undefined
+				sessionName.trim() || undefined,
+				branchName.trim() || undefined
 			);
 
 			if (instructions.trim()) {
@@ -218,6 +220,16 @@
 					placeholder="Describe what the agent should work on..."
 					rows="3"
 				></textarea>
+			</label>
+
+			<label class="field">
+				<span class="field-label">Branch name <span class="optional">(optional)</span></span>
+				<input
+					type="text"
+					class="field-input"
+					bind:value={branchName}
+					placeholder="tyck/claude-code/auto-generated"
+				/>
 			</label>
 
 			{#if error}

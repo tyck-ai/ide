@@ -124,6 +124,10 @@
 				path: session.worktreePath || $projectRoot,
 				branch: session.branchName,
 			});
+			// Auto-accept all remaining pending files — the branch is now on GitHub for review there.
+			if ($activeSessionId) {
+				await sessionReview.acceptAll($activeSessionId);
+			}
 			toast.success(`Pushed ${session.branchName}`);
 
 			// Create PR via gh CLI
@@ -282,7 +286,7 @@
 
 		<div class="review-actions">
 			<button class="review-btn push" onclick={openPrModal} disabled={pushing || totalPending === 0}>
-				{pushing ? 'Pushing...' : 'Push & PR'}
+				{pushing ? 'Pushing...' : 'Commit & Push'}
 			</button>
 			<button class="review-btn merge" onclick={() => showMergeModal = true} disabled={merging || totalPending === 0}>
 				{merging ? 'Merging...' : 'Merge to Workspace'}
@@ -322,14 +326,14 @@
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div class="pr-backdrop" onclick={() => { showPrModal = false; agentRequestedPR = false; }}>
 		<div class="pr-modal" onclick={(e) => e.stopPropagation()}>
-			<div class="pr-title">Create Pull Request</div>
+			<div class="pr-title">Commit & Push</div>
 
-			{#if agentRequestedPR && pendingReviewCount > 0}
+			{#if pendingReviewCount > 0}
 				<div class="pending-warning">
 					<span class="warn-icon">⚠</span>
 					<span>
-						<strong>{pendingReviewCount} file{pendingReviewCount !== 1 ? 's' : ''}</strong> still pending review.
-						Pushing now will include the agent's version of those files as-is.
+						<strong>{pendingReviewCount} file{pendingReviewCount !== 1 ? 's' : ''}</strong> not yet reviewed.
+						They will be pushed to the branch as written by the agent.
 					</span>
 					<button class="review-first-btn" onclick={() => { showPrModal = false; agentRequestedPR = false; }}>
 						Review first
@@ -348,7 +352,7 @@
 			<div class="pr-actions">
 				<button class="pr-btn cancel" onclick={() => { showPrModal = false; agentRequestedPR = false; }}>Cancel</button>
 				<button class="pr-btn create" onclick={pushAndPr} disabled={pushing}>
-					{pushing ? 'Creating...' : 'Push & Create PR'}
+					{pushing ? 'Pushing...' : 'Commit & Push'}
 				</button>
 			</div>
 		</div>

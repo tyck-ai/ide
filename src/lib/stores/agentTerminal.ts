@@ -61,7 +61,7 @@ async function stopProviderSessionDiscovery(worktreeSessionId: string): Promise<
 	}
 }
 
-export async function spawnAgentSession(resumeSessionId?: string, providerId?: string, resumeSessionPath?: string, name?: string): Promise<string> {
+export async function spawnAgentSession(resumeSessionId?: string, providerId?: string, resumeSessionPath?: string, name?: string, branchName?: string): Promise<string> {
 	const provider = providerId
 		? get(agentProviders).find(p => p.id === providerId) ?? get(activeProvider)
 		: get(activeProvider);
@@ -227,6 +227,9 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 		// Awaited so the unlisten is tracked before invoke() can throw.
 		const worktreeReadyUnlisten = await listen(`worktree-ready-${id}`, async () => {
 			try {
+				// Worktree directory now exists — ensure the fs watcher is registered
+				// (it may have failed earlier if the directory was not ready yet).
+				await sessionReview.reactivateWatcher();
 				await sessionReview.refreshDiffs(id);
 			} catch {
 				// non-critical
@@ -294,7 +297,7 @@ export async function spawnAgentSession(resumeSessionId?: string, providerId?: s
 	const session: AgentSession = {
 		id,
 		label,
-		branchName: `tyck/${provider.id}/${id.slice(0, 8)}`,
+		branchName: branchName?.trim() || `tyck/${provider.id}/${id.slice(0, 8)}`,
 		worktreePath: agentCwd || cwd || '',
 		providerId: provider.id,
 		statusFile,

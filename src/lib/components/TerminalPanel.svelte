@@ -15,6 +15,8 @@
 	import { get } from 'svelte/store';
 	import { projectRoot } from '$lib/stores/editor';
 
+	let { rightOffset = 0 }: { rightOffset?: number } = $props();
+
 	let panelHeight = $state(250);
 	let dragging = $state(false);
 	let dragCleanup: (() => void) | null = null;
@@ -87,7 +89,7 @@
 		class="terminal-panel"
 		class:dragging
 		class:collapsed={!panelOpen}
-		style="height: {panelOpen ? panelHeight : 0}px"
+		style="height: {panelOpen ? panelHeight : 0}px; right: {rightOffset}px"
 	>
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="drag-handle-h" onmousedown={onDragStart}>

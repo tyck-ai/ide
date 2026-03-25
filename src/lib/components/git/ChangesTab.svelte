@@ -38,6 +38,9 @@
 
 		return () => {
 			if (diffEditor) {
+				const model = diffEditor.getModel();
+				model?.original?.dispose();
+				model?.modified?.dispose();
 				diffEditor.dispose();
 			}
 		};
@@ -67,10 +70,15 @@
 
 			if (diffEditor) {
 				const monaco = await import('monaco-editor');
+				const originalUri = monaco.Uri.parse(`original://${path}`);
+				const modifiedUri = monaco.Uri.parse(`modified://${path}`);
+				// Dispose stale models left in registry from a previous navigation
+				monaco.editor.getModel(originalUri)?.dispose();
+				monaco.editor.getModel(modifiedUri)?.dispose();
 				const oldModel = diffEditor.getModel();
 				diffEditor.setModel({
-					original: monaco.editor.createModel(original, undefined, monaco.Uri.parse(`original://${path}`)),
-					modified: monaco.editor.createModel(modified, undefined, monaco.Uri.parse(`modified://${path}`)),
+					original: monaco.editor.createModel(original, undefined, originalUri),
+					modified: monaco.editor.createModel(modified, undefined, modifiedUri),
 				});
 				oldModel?.original?.dispose();
 				oldModel?.modified?.dispose();

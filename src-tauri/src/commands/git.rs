@@ -222,8 +222,11 @@ pub fn git_add_remote(path: String, name: String, url: String) -> Result<(), Str
 
 #[tauri::command]
 pub fn git_push_branch(path: String, branch: String) -> Result<(), String> {
+    // Use HEAD:refs/heads/<branch> so the push works from a detached-HEAD worktree
+    // (the worktree is created with --detach, so no local branch ref exists).
+    let refspec = format!("HEAD:refs/heads/{}", branch);
     let output = Command::new("git")
-        .args(["push", "--set-upstream", "origin", &branch])
+        .args(["push", "--set-upstream", "origin", &refspec])
         .current_dir(&path)
         .output()
         .map_err(|e| format!("Failed to push: {}", e))?;
